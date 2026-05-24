@@ -232,3 +232,41 @@ export function WrenchIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+export function SakrylleLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <defs>
+        <linearGradient id="sakrylle-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#b9a9da" />
+          <stop offset="55%" stopColor="#9181bd" />
+          <stop offset="100%" stopColor="#6e5fa6" />
+        </linearGradient>
+        <radialGradient id="sakrylle-petal-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.85" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx="20" cy="20" r="18" fill="url(#sakrylle-grad)" />
+      <circle cx="14" cy="13" r="6" fill="url(#sakrylle-petal-glow)" />
+      <g transform="translate(20 20)" fill="#ffffff" fillOpacity="0.95">
+        <path d="M0 -8.6 C2.4 -7.4 3.2 -4.6 1.5 -2.6 C0.5 -1.5 -0.5 -1.5 -1.5 -2.6 C-3.2 -4.6 -2.4 -7.4 0 -8.6 Z" transform="rotate(0)" />
+        <path d="M0 -8.6 C2.4 -7.4 3.2 -4.6 1.5 -2.6 C0.5 -1.5 -0.5 -1.5 -1.5 -2.6 C-3.2 -4.6 -2.4 -7.4 0 -8.6 Z" transform="rotate(72)" />
+        <path d="M0 -8.6 C2.4 -7.4 3.2 -4.6 1.5 -2.6 C0.5 -1.5 -0.5 -1.5 -1.5 -2.6 C-3.2 -4.6 -2.4 -7.4 0 -8.6 Z" transform="rotate(144)" />
+        <path d="M0 -8.6 C2.4 -7.4 3.2 -4.6 1.5 -2.6 C0.5 -1.5 -0.5 -1.5 -1.5 -2.6 C-3.2 -4.6 -2.4 -7.4 0 -8.6 Z" transform="rotate(216)" />
+        <path d="M0 -8.6 C2.4 -7.4 3.2 -4.6 1.5 -2.6 C0.5 -1.5 -0.5 -1.5 -1.5 -2.6 C-3.2 -4.6 -2.4 -7.4 0 -8.6 Z" transform="rotate(288)" />
+        <circle r="1.7" fill="#fff5b8" />
+      </g>
+    </svg>
+  )
+}
+
+export function CoinIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9 9.5a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-2.5 2.5S9 13 9 14.5a2.5 2.5 0 0 0 5 0" />
+      <path d="M11.5 5.5v1.5M11.5 17v1.5" />
+    </svg>
+  )
+}

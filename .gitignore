@@ -3,3 +3,8 @@ dist/
 dev-proxy.config.json
 .wrangler/
 CLAUDE.md
+.playwright-mcp/
+sakrylle-about.png
+sakrylle-home.png
+scripts/i18n_*.py
+docs/OAUTH_CLIENT_INTEGRATION.md
