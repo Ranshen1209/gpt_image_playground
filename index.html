@@ -8,12 +8,38 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Sakrylle" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <script>
+      (function () {
+        try {
+          var THEME_KEY = 'sakrylle-image-playground.theme';
+          var LANG_KEY = 'sakrylle-image-playground.language';
+          var raw = null;
+          try { raw = localStorage.getItem(THEME_KEY); } catch (_) {}
+          var prefersDark = false;
+          try { prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (_) {}
+          var dark = raw === 'dark' || (raw !== 'light' && prefersDark);
+          if (dark) document.documentElement.classList.add('dark');
+
+          var lang = null;
+          try { lang = localStorage.getItem(LANG_KEY); } catch (_) {}
+          if (lang !== 'zh' && lang !== 'en') {
+            var navLangs = (navigator.languages || [navigator.language || '']).map(function (l) {
+              return (l || '').toLowerCase();
+            });
+            var hasZh = navLangs.some(function (l) { return l.indexOf('zh') === 0; });
+            var hasEn = navLangs.some(function (l) { return l.indexOf('en') === 0; });
+            lang = hasZh ? 'zh' : (hasEn ? 'en' : 'en');
+          }
+          document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+        } catch (e) {}
+      })();
+    </script>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="./pwa-icon-512.png" />
-    <link rel="icon" href="./pwa-icon-512.png" type="image/png" />
+    <link rel="apple-touch-icon" href="./favicon.png" />
+    <link rel="icon" href="./favicon.png" type="image/png" />
     <title>Sakrylle 图像工坊</title>
   </head>
-  <body class="bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 min-h-screen">
+  <body class="bg-[#f7f4fb] text-gray-900 dark:bg-[#0e0c14] dark:text-gray-100 min-h-screen sakrylle-ambient">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
