@@ -1,4 +1,5 @@
 import type { AppSettings, TaskParams } from '../types'
+import i18n from './i18n'
 
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
@@ -67,12 +68,16 @@ export function getDataUrlDecodedByteSize(dataUrl: string): number {
 
 function assertMaxBytes(label: string, bytes: number, maxBytes: number) {
   if (bytes > maxBytes) {
-    throw new Error(`${label}过大：${formatMiB(bytes)}，上限为 ${formatMiB(maxBytes)}`)
+    throw new Error(i18n.t('errors.fileTooLargeLabel', {
+      label,
+      actual: formatMiB(bytes),
+      limit: formatMiB(maxBytes),
+    }))
   }
 }
 
 export function assertImageInputPayloadSize(bytes: number) {
-  assertMaxBytes('图像输入有效负载总大小', bytes, MAX_IMAGE_INPUT_PAYLOAD_BYTES)
+  assertMaxBytes(i18n.t('errors.imageInputPayload'), bytes, MAX_IMAGE_INPUT_PAYLOAD_BYTES)
 }
 
 export function assertMaskEditFileSize(label: string, bytes: number) {
@@ -91,7 +96,23 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> 
   return `data:${blob.type || fallbackMime};base64,${btoa(binary)}`
 }
 
-export const IMAGE_FETCH_CORS_HINT = ' 可点链接按钮复制结果链接，或尝试开启「返回 Base64 图片数据」避免此问题。'
+// 历史值（i18n 引入前 + 切换语言时已生成的错误消息中可能包含的提示文案）
+const LEGACY_IMAGE_FETCH_CORS_HINTS: ReadonlyArray<string> = [
+  ' 可点链接按钮复制结果链接，或尝试开启「返回 Base64 图片数据」避免此问题。',
+  ' Use the link button to copy the result link, or enable "Return Base64 image data" to avoid this.',
+]
+
+/** 渲染时翻译当前语言版本的 CORS hint */
+export function getImageFetchCorsHint(): string {
+  return i18n.t('errors.imageFetchCorsHint')
+}
+
+/** 判断错误消息是否已经带有 CORS hint（兼容当前语言与历史值） */
+export function messageContainsImageFetchCorsHint(message: string): boolean {
+  if (!message) return false
+  if (message.includes(getImageFetchCorsHint())) return true
+  return LEGACY_IMAGE_FETCH_CORS_HINTS.some((hint) => message.includes(hint))
+}
 
 async function probeNoCorsReachability(url: string, timeoutMs = 8000): Promise<'opaque' | 'reachable' | 'failed'> {
   const controller = new AbortController()
@@ -124,18 +145,18 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
     if (err instanceof TypeError) {
       const probe = await probeNoCorsReachability(url)
       if (probe === 'opaque') {
-        throw new Error(`图片已生成，但因服务商未允许跨域，图片链接下载失败。${IMAGE_FETCH_CORS_HINT}`)
+        throw new Error(i18n.t('errors.imageDownloadCors', { hint: getImageFetchCorsHint() }))
       }
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        throw new Error(`图片链接下载失败（网络不可用）。${IMAGE_FETCH_CORS_HINT}`)
+        throw new Error(i18n.t('errors.imageDownloadOffline', { hint: getImageFetchCorsHint() }))
       }
-      throw new Error(`图片链接下载失败（可能因跨域限制、链接过期或网络异常）。${IMAGE_FETCH_CORS_HINT}`)
+      throw new Error(i18n.t('errors.imageDownloadFailed', { hint: getImageFetchCorsHint() }))
     }
     throw err
   }
 
   if (!response.ok) {
-    throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
+    throw new Error(i18n.t('errors.imageDownloadHttp', { status: response.status }))
   }
 
   const blob = await response.blob()

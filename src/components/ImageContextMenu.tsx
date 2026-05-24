@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore, addImageFromUrl, ensureImageCached } from '../store'
 import { copyImageSourceToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { downloadImageIds, formatExportFileTime } from '../lib/downloadImages'
@@ -6,6 +7,7 @@ import { suppressGlobalClicks } from '../lib/clickSuppression'
 import { CopyIcon, DownloadIcon, EditIcon } from './icons'
 
 export default function ImageContextMenu() {
+  const { t } = useTranslation()
   const [menuInfo, setMenuInfo] = useState<{ src: string; imageId?: string; outputImageIds: string[]; x: number; y: number } | null>(null)
   const showToast = useStore((s) => s.showToast)
   const inputImages = useStore((s) => s.inputImages)
@@ -86,10 +88,10 @@ export default function ImageContextMenu() {
     setMenuInfo(null)
     try {
       await copyImageSourceToClipboard(getOriginalImageSrc())
-      showToast('图片已复制', 'success')
+      showToast(t('contextMenu.imageCopied'), 'success')
     } catch (err) {
       console.error(err)
-      showToast(getClipboardFailureMessage('复制失败', err), 'error')
+      showToast(getClipboardFailureMessage(t('contextMenu.copyFailed'), err), 'error')
     }
   }
 
@@ -116,13 +118,13 @@ export default function ImageContextMenu() {
 
       const result = await downloadImageIds([imageId || src], fileNameBase)
       if (result.successCount === 0) {
-        showToast('下载失败', 'error')
+        showToast(t('contextMenu.downloadFailed'), 'error')
       } else {
-        showToast('下载成功', 'success')
+        showToast(t('contextMenu.downloadSuccess'), 'success')
       }
     } catch (err) {
       console.error(err)
-      showToast('下载失败', 'error')
+      showToast(t('contextMenu.downloadFailed'), 'error')
     }
   }
 
@@ -148,15 +150,15 @@ export default function ImageContextMenu() {
 
       const result = await downloadImageIds(outputImageIds, fileNameBase)
       if (result.successCount === 0) {
-        showToast('下载失败', 'error')
+        showToast(t('contextMenu.downloadFailed'), 'error')
       } else if (result.failCount > 0) {
-        showToast(`部分下载失败：成功 ${result.successCount}，失败 ${result.failCount}`, 'error')
+        showToast(t('contextMenu.downloadPartialFailed', { success: result.successCount, fail: result.failCount }), 'error')
       } else {
-        showToast(result.successCount > 1 ? `下载成功：${result.successCount} 张图片` : '下载成功', 'success')
+        showToast(result.successCount > 1 ? t('contextMenu.downloadSuccessCount', { count: result.successCount }) : t('contextMenu.downloadSuccess'), 'success')
       }
     } catch (err) {
       console.error(err)
-      showToast('下载失败', 'error')
+      showToast(t('contextMenu.downloadFailed'), 'error')
     }
   }
 
@@ -164,7 +166,7 @@ export default function ImageContextMenu() {
     e.stopPropagation()
     setMenuInfo(null)
     if (inputImages.length >= 16) {
-      showToast('参考图数量已达上限（16 张），无法继续添加', 'error')
+      showToast(t('contextMenu.referenceLimitReached', { limit: 16 }), 'error')
       return
     }
 
@@ -174,10 +176,10 @@ export default function ImageContextMenu() {
       setDetailTaskId(null)
       setLightboxImageId(null)
       setMaskEditorImageId(null)
-      showToast('已加入参考图', 'success')
+      showToast(t('contextMenu.addedToReferences'), 'success')
     } catch (err) {
       console.error(err)
-      showToast(`加入参考图失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      showToast(t('contextMenu.addToReferencesFailed', { error: err instanceof Error ? err.message : String(err) }), 'error')
     }
   }
 
@@ -207,14 +209,14 @@ export default function ImageContextMenu() {
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
         <CopyIcon className="w-4 h-4 flex-shrink-0" />
-        复制
+        {t('contextMenu.copy')}
       </button>
       <button
         onClick={handleDownload}
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
         <DownloadIcon className="w-4 h-4 flex-shrink-0" />
-        下载
+        {t('contextMenu.download')}
       </button>
       {showDownloadAll && (
         <button
@@ -222,7 +224,7 @@ export default function ImageContextMenu() {
           className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
         >
           <DownloadIcon className="w-4 h-4 flex-shrink-0" />
-          下载全部
+          {t('contextMenu.downloadAll')}
         </button>
       )}
       <button
@@ -230,7 +232,7 @@ export default function ImageContextMenu() {
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
         <EditIcon className="w-4 h-4 flex-shrink-0" />
-        编辑
+        {t('contextMenu.edit')}
       </button>
     </div>
   )

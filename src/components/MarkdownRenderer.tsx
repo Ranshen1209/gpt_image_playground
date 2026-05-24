@@ -1,4 +1,5 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Components, StreamdownTranslations } from 'streamdown'
 import type { Components as ReactMarkdownComponents } from 'react-markdown'
 
@@ -66,26 +67,9 @@ const legacyMarkdownComponents: ReactMarkdownComponents = {
 }
 
 const translations: Partial<StreamdownTranslations> = {
-  copied: '已复制',
-  copyCode: '复制代码',
-  copyLink: '复制链接',
-  copyTable: '复制表格',
-  copyTableAsCsv: '复制为 CSV',
-  copyTableAsMarkdown: '复制为 Markdown',
-  copyTableAsTsv: '复制为 TSV',
-  downloadFile: '下载文件',
-  downloadImage: '下载图片',
-  downloadTable: '下载表格',
-  downloadTableAsCsv: '下载为 CSV',
-  downloadTableAsMarkdown: '下载为 Markdown',
-  externalLinkWarning: '即将打开外部链接',
-  imageNotAvailable: '图片不可用',
-  openExternalLink: '打开外部链接',
-  openLink: '打开链接',
   tableFormatCsv: 'CSV',
   tableFormatMarkdown: 'Markdown',
   tableFormatTsv: 'TSV',
-  viewFullscreen: '全屏查看',
 }
 
 const canLoadStreamdown = (() => {
@@ -147,7 +131,29 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   streaming = false,
   className = '',
 }: MarkdownRendererProps) {
+  const { t } = useTranslation()
   const [renderer, setRenderer] = useState<MarkdownRendererState>({ type: 'loading' })
+
+  const localizedTranslations = useMemo<Partial<StreamdownTranslations>>(() => ({
+    ...translations,
+    copied: t('markdown.copied'),
+    copyCode: t('markdown.copyCode'),
+    copyLink: t('markdown.copyLink'),
+    copyTable: t('markdown.copyTable'),
+    copyTableAsCsv: t('markdown.copyTableAsCsv'),
+    copyTableAsMarkdown: t('markdown.copyTableAsMarkdown'),
+    copyTableAsTsv: t('markdown.copyTableAsTsv'),
+    downloadFile: t('markdown.downloadFile'),
+    downloadImage: t('markdown.downloadImage'),
+    downloadTable: t('markdown.downloadTable'),
+    downloadTableAsCsv: t('markdown.downloadTableAsCsv'),
+    downloadTableAsMarkdown: t('markdown.downloadTableAsMarkdown'),
+    externalLinkWarning: t('markdown.externalLinkWarning'),
+    imageNotAvailable: t('markdown.imageNotAvailable'),
+    openExternalLink: t('markdown.openExternalLink'),
+    openLink: t('markdown.openLink'),
+    viewFullscreen: t('markdown.viewFullscreen'),
+  }), [t])
 
   useEffect(() => {
     let disposed = false
@@ -197,7 +203,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
       mode={streaming ? 'streaming' : 'static'}
       parseIncompleteMarkdown={streaming}
       skipHtml
-      translations={translations}
+      translations={localizedTranslations}
       urlTransform={safeUrl}
     >
       {content}

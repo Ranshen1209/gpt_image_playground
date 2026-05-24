@@ -6,6 +6,7 @@ import type {
   ReferenceImageEditAction,
 } from '../types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES } from '../types'
+import i18n from './i18n'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const DEFAULT_BASE_URL = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || 'https://api.sakrylle.com/v1'
@@ -37,10 +38,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+export const DEFAULT_OPENAI_PROFILE_NAME = 'Default'
+const LEGACY_DEFAULT_PROFILE_NAMES: ReadonlyArray<string> = [DEFAULT_OPENAI_PROFILE_NAME, '默认']
+
 export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
   return {
     id: DEFAULT_OPENAI_PROFILE_ID,
-    name: '默认',
+    name: DEFAULT_OPENAI_PROFILE_NAME,
     provider: 'openai',
     baseUrl: DEFAULT_BASE_URL,
     apiKey: '',
@@ -65,7 +69,9 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
   return {
     ...defaults,
     id: typeof record.id === 'string' && record.id.trim() ? record.id : defaults.id,
-    name: typeof record.name === 'string' && record.name.trim() ? record.name : defaults.name,
+    name: typeof record.name === 'string' && record.name.trim()
+      ? (record.name === '默认' ? DEFAULT_OPENAI_PROFILE_NAME : record.name)
+      : defaults.name,
     provider,
     baseUrl: rawBaseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
@@ -85,11 +91,11 @@ function validateImportedProfileRecord(input: unknown) {
 
   const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : ''
   if (baseUrl && (baseUrl.startsWith('[') || baseUrl.includes(']('))) {
-    throw new Error('JSON 包含 Markdown 链接，请粘贴纯文本')
+    throw new Error(i18n.t('errors.profile.jsonMarkdownLink'))
   }
 
   if (typeof input.apiMode === 'string' && input.apiMode !== 'images' && input.apiMode !== 'responses') {
-    throw new Error('apiMode 格式无效，应为 images 或 responses')
+    throw new Error(i18n.t('errors.profile.invalidApiMode'))
   }
 }
 
@@ -159,16 +165,16 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
-  if (!profile.name.trim()) return '缺少名称'
-  if (!profile.baseUrl.trim()) return '缺少 API URL'
-  if (!profile.apiKey.trim()) return '缺少 API Key'
-  if (!profile.model.trim()) return '缺少模型 ID'
+  if (!profile.name.trim()) return i18n.t('errors.profile.missingName')
+  if (!profile.baseUrl.trim()) return i18n.t('errors.profile.missingBaseUrl')
+  if (!profile.apiKey.trim()) return i18n.t('errors.profile.missingApiKey')
+  if (!profile.model.trim()) return i18n.t('errors.profile.missingModel')
   return null
 }
 
 function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
   return profile.id === DEFAULT_OPENAI_PROFILE_ID &&
-    profile.name === '默认' &&
+    LEGACY_DEFAULT_PROFILE_NAMES.includes(profile.name) &&
     profile.provider === 'openai' &&
     profile.baseUrl === DEFAULT_BASE_URL &&
     profile.apiKey === '' &&

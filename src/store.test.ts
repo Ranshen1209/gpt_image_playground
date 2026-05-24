@@ -4,6 +4,7 @@ import { DEFAULT_PARAMS } from './types'
 import { createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
+import { SENTINEL_OPENAI_INTERRUPTED } from './lib/agentSentinels'
 vi.mock('./lib/db', () => {
   const tasks = new Map<string, TaskRecord>()
   const images = new Map<string, StoredImage>()
@@ -239,13 +240,13 @@ describe('interrupted OpenAI running tasks', () => {
     expect(result.interruptedTasks.map((item) => item.id)).toEqual(['legacy-running', 'openai-running'])
     expect(result.tasks.find((item) => item.id === 'legacy-running')).toMatchObject({
       status: 'error',
-      error: expect.stringContaining('请求中断'),
+      error: SENTINEL_OPENAI_INTERRUPTED,
       finishedAt: now,
       elapsed: 9_000,
     })
     expect(result.tasks.find((item) => item.id === 'openai-running')).toMatchObject({
       status: 'error',
-      error: expect.stringContaining('请求中断'),
+      error: SENTINEL_OPENAI_INTERRUPTED,
       finishedAt: now,
       elapsed: 8_000,
     })

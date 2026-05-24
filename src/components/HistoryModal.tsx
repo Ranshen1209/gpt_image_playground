@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react'
+import { useTranslation } from 'react-i18next'
 import { removeMultipleTasks, useStore } from '../store'
 import type { AgentConversation } from '../types'
 import { useTooltip } from '../hooks/useTooltip'
@@ -44,7 +45,7 @@ function HistoryActionButton({
   )
 }
 
-function formatTime(value: number) {
+function getTimeKey(value: number): 'today' | 'yesterday' | 'thisWeek' | 'earlier' {
   const date = new Date(value)
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
@@ -52,17 +53,17 @@ function formatTime(value: number) {
   const dayOfWeek = now.getDay() || 7
   const startOfWeek = startOfToday - (dayOfWeek - 1) * 24 * 60 * 60 * 1000
   const time = date.getTime()
-  if (time >= startOfToday) return '今天'
-  if (time >= startOfYesterday) return '昨天'
-  if (time >= startOfWeek) return '本周'
-  return '更早'
+  if (time >= startOfToday) return 'today'
+  if (time >= startOfYesterday) return 'yesterday'
+  if (time >= startOfWeek) return 'thisWeek'
+  return 'earlier'
 }
 
 function formatDetailTime(value: number) {
   const date = new Date(value)
   const now = new Date()
   const sameYear = date.getFullYear() === now.getFullYear()
-  const formatter = new Intl.DateTimeFormat('zh-CN', {
+  const formatter = new Intl.DateTimeFormat(undefined, {
     ...(sameYear ? {} : { year: 'numeric' }),
     month: '2-digit',
     day: '2-digit',
@@ -87,6 +88,7 @@ type HistoryModalProps = {
 }
 
 export default function HistoryModal({ onClose, ignoreOutsideClickRef }: HistoryModalProps) {
+  const { t } = useTranslation()
   const conversations = useStore((s) => s.agentConversations)
   const activeConversationId = useStore((s) => s.activeAgentConversationId)
   const setActiveConversationId = useStore((s) => s.setActiveAgentConversationId)
@@ -177,11 +179,11 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
     ).size
 
     setConfirmDialog({
-      title: '删除对话',
-      message: '确定要删除这个 Agent 对话吗？',
+      title: t('history.deleteConversationTitle'),
+      message: t('history.deleteConversationMessage'),
       checkbox: generatedImageCount > 0
         ? {
-            label: `同时删除对话中生成的图片（${generatedImageCount} 张）`,
+            label: t('history.deleteConversationCheckbox', { count: generatedImageCount }),
             tone: 'danger',
           }
         : undefined,
@@ -216,9 +218,9 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
   // Group by time
   const groups: Record<string, AgentConversation[]> = {}
   for (const c of filteredConversations) {
-    const timeLabel = formatTime(c.updatedAt)
-    if (!groups[timeLabel]) groups[timeLabel] = []
-    groups[timeLabel].push(c)
+    const timeKey = getTimeKey(c.updatedAt)
+    if (!groups[timeKey]) groups[timeKey] = []
+    groups[timeKey].push(c)
   }
 
   return (
@@ -229,23 +231,23 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
       <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-white/10 shrink-0">
         <input 
           type="text" 
-          placeholder="搜索聊天..." 
+          placeholder={t('history.searchPlaceholder')} 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="flex-1 bg-transparent border-none outline-none text-sm px-2 text-gray-900 dark:text-white placeholder-gray-400"
         />
-        <HistoryActionButton tooltip="关闭" onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-gray-400 transition-colors">
+        <HistoryActionButton tooltip={t('history.close')} onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded-lg text-gray-500 dark:text-gray-400 transition-colors">
           <CloseIcon className="w-4 h-4" />
         </HistoryActionButton>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1 overscroll-contain">
         {filteredConversations.length === 0 && (
-          <div className="px-3 py-8 text-center text-sm text-gray-500">没有找到匹配的聊天</div>
+          <div className="px-3 py-8 text-center text-sm text-gray-500">{t('history.noResults')}</div>
         )}
 
         {Object.entries(groups).map(([label, items]) => (
           <div key={label}>
-            <div className="mt-4 mb-1 px-3 text-xs font-medium text-gray-500">{label}</div>
+            <div className="mt-4 mb-1 px-3 text-xs font-medium text-gray-500">{t(`history.${label}` as 'history.today' | 'history.yesterday' | 'history.thisWeek' | 'history.earlier')}</div>
             {items.map(c => (
               <div 
                 key={c.id} 
@@ -259,7 +261,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                   {editingId === c.id ? (
                     <input
                       type="text"
-                      className="flex-1 bg-white dark:bg-black/20 border border-blue-400/50 dark:border-white/20 rounded px-1.5 py-0.5 text-sm outline-none text-gray-900 dark:text-white focus:border-blue-500 dark:focus:border-white/40 shadow-sm min-w-0"
+                      className="flex-1 bg-white dark:bg-black/20 border border-[#9181bd]/50 dark:border-white/20 rounded px-1.5 py-0.5 text-sm outline-none text-gray-900 dark:text-white focus:border-[#9181bd] dark:focus:border-white/40 shadow-sm min-w-0"
                       value={editingTitle}
                       onChange={(e) => setEditingTitle(e.target.value)}
                       onKeyDown={handleRenameKeyDown}
@@ -281,7 +283,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
                   {editingId === c.id ? (
                     <HistoryActionButton
-                      tooltip="确认"
+                      tooltip={t('history.confirm')}
                       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); confirmRename() }}
                       className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
                     >
@@ -292,7 +294,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                   ) : (
                     <>
                       <HistoryActionButton
-                        tooltip="重命名"
+                        tooltip={t('history.rename')}
                         onClick={(e) => startRename(e, c.id, c.title)}
                         className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-white disabled:text-gray-300 disabled:hover:text-gray-300 dark:disabled:text-gray-600 dark:disabled:hover:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors"
                         disabled={Boolean(agentGeneratingTitleIds[c.id])}
@@ -300,7 +302,7 @@ export default function HistoryModal({ onClose, ignoreOutsideClickRef }: History
                         <EditIcon className="w-3.5 h-3.5" />
                       </HistoryActionButton>
                       <HistoryActionButton
-                        tooltip="删除"
+                        tooltip={t('history.delete')}
                         onClick={(e) => handleDelete(e, c.id)}
                         className="p-1.5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                       >

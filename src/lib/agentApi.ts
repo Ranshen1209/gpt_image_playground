@@ -1,6 +1,7 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { getApiErrorMessage, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import i18n from './i18n'
 
 export interface AgentApiMessage {
   role: 'user' | 'assistant'
@@ -248,7 +249,7 @@ function getStreamEventErrorMessage(event: Record<string, unknown>): string | nu
   if (typeof error === 'string' && error.trim()) return error
 
   const type = getStringValue(event, 'type')
-  if (type?.endsWith('.failed')) return getStringValue(event, 'message') ?? 'Agent 流式请求失败'
+  if (type?.endsWith('.failed')) return getStringValue(event, 'message') ?? i18n.t('errors.agentStreamFailed')
   return null
 }
 
@@ -272,11 +273,11 @@ function getAbortedSignal(signals: Array<AbortSignal | undefined>) {
 function throwIfAborted(...signals: Array<AbortSignal | undefined>) {
   const signal = getAbortedSignal(signals)
   if (!signal) return
-  throw signal.reason instanceof Error ? signal.reason : new DOMException('请求已停止', 'AbortError')
+  throw signal.reason instanceof Error ? signal.reason : new DOMException(i18n.t('errors.requestStopped'), 'AbortError')
 }
 
 async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>, signals: Array<AbortSignal | undefined> = []): Promise<void> {
-  if (!response.body) throw new Error('接口未返回可读取的流式响应')
+  if (!response.body) throw new Error(i18n.t('errors.agentStreamNoBody'))
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -295,7 +296,7 @@ async function readJsonServerSentEvents(response: Response, onEvent: (event: Rec
     try {
       event = JSON.parse(data)
     } catch {
-      throw new Error('Agent 流式响应包含无法解析的 JSON 事件')
+      throw new Error(i18n.t('errors.agentStreamInvalidJson'))
     }
     if (!isRecordValue(event)) return
 
@@ -589,7 +590,7 @@ async function parseAgentStreamResponse(
 
   throwIfAborted(signal, callerSignal)
   const payload: ResponsesApiResponse | null = completedPayload ?? (outputItems.length ? { output: outputItems } : null)
-  if (!payload) throw new Error('Agent 流式接口未返回最终响应数据')
+  if (!payload) throw new Error(i18n.t('errors.agentStreamNoFinal'))
 
   const text = extractText(payload) || streamedText.trim()
   return {
@@ -869,7 +870,7 @@ export async function callBatchImageSingle(opts: {
       return {
         batchItemId,
         image: completedImage,
-        error: completedImage ? null : '流式响应未返回图片',
+        error: completedImage ? null : i18n.t('errors.streamingNoImage'),
         rawResponsePayload: rawPayload,
       }
     }
@@ -882,12 +883,12 @@ export async function callBatchImageSingle(opts: {
     return {
       batchItemId,
       image,
-      error: image ? null : '接口未返回图片数据',
+      error: image ? null : i18n.t('errors.imagePayloadMissing'),
       rawResponsePayload: JSON.stringify(payload, null, 2),
     }
   } catch (err) {
     if (controller.signal.aborted || signal?.aborted) {
-      return { batchItemId, image: null, error: '请求已取消' }
+      return { batchItemId, image: null, error: i18n.t('errors.requestCancelled') }
     }
     return { batchItemId, image: null, error: err instanceof Error ? err.message : String(err) }
   } finally {

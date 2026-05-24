@@ -1,6 +1,7 @@
 import { DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type ImageApiResponse, type ImageResponseItem, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
+import i18n from './i18n'
 import {
   assertImageInputPayloadSize,
   assertMaskEditFileSize,
@@ -67,7 +68,7 @@ function getStreamEventErrorMessage(event: Record<string, unknown>): string | nu
 
   const type = getStringValue(event, 'type')
   if (type?.endsWith('.failed')) {
-    return getStringValue(event, 'message') ?? '流式请求失败'
+    return getStringValue(event, 'message') ?? i18n.t('errors.imagesStreamFailed')
   }
   return null
 }
@@ -86,7 +87,7 @@ function parseServerSentEventBlock(block: string): string | null {
 }
 
 async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>): Promise<void> {
-  if (!response.body) throw new Error('接口未返回可读取的流式响应')
+  if (!response.body) throw new Error(i18n.t('errors.imagesStreamNoBody'))
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -100,7 +101,7 @@ async function readJsonServerSentEvents(response: Response, onEvent: (event: Rec
     try {
       event = JSON.parse(data)
     } catch {
-      throw new Error('流式响应包含无法解析的 JSON 事件')
+      throw new Error(i18n.t('errors.imagesStreamInvalidJson'))
     }
     if (!isRecordValue(event)) return
 
@@ -189,7 +190,7 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
 }> {
   const output = payload.output
   if (!Array.isArray(output) || !output.length) {
-    const err = new Error('接口未返回图片数据')
+    const err = new Error(i18n.t('errors.imageDataMissing'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -210,7 +211,7 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
   }
 
   if (!results.length) {
-    const err = new Error('接口没有返回可识别的图片数据，请查看原始响应内容确认服务商实际返回的数据结构。')
+    const err = new Error(i18n.t('errors.unrecognizedImagePayload'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -239,7 +240,7 @@ function getResponsesImageResultBase64(result: ResponsesOutputItem['result']): s
 async function parseImagesApiResponse(payload: ImageApiResponse, mime: string, signal?: AbortSignal): Promise<CallApiResult> {
   const data = payload.data
   if (!Array.isArray(data) || !data.length) {
-    const err = new Error('接口没有返回图片数据，请查看原始响应内容确认服务商实际返回的数据结构。')
+    const err = new Error(i18n.t('errors.noImagePayload'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -269,7 +270,7 @@ async function parseImagesApiResponse(payload: ImageApiResponse, mime: string, s
   }
 
   if (!images.length) {
-    const err = new Error('接口没有返回可识别的图片数据，请查看原始响应内容确认服务商实际返回的数据结构。')
+    const err = new Error(i18n.t('errors.unrecognizedImagePayload'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -335,14 +336,14 @@ async function parseImagesApiStreamResponse(
   }
 
   if (!completedItems.length) {
-    throw new Error('流式接口未返回最终图片数据')
+    throw new Error(i18n.t('errors.imagesStreamNoFinal'))
   }
 
   const images = completedItems
     .map((item) => item.b64_json)
     .filter((b64): b64 is string => Boolean(b64))
     .map((b64) => normalizeBase64Image(b64, mime))
-  if (!images.length) throw new Error('流式接口未返回可用图片数据')
+  if (!images.length) throw new Error(i18n.t('errors.imagesStreamNoUsable'))
 
   const actualParamsList = completedItems.map((item) => mergeActualParams(pickActualParams(item)))
   const actualParams = mergeActualParams(
@@ -402,7 +403,7 @@ async function parseResponsesApiStreamResponse(
   })
 
   const payload = completedPayload ?? (outputItems.length ? { output: outputItems } : null)
-  if (!payload) throw new Error('流式接口未返回最终图片数据')
+  if (!payload) throw new Error(i18n.t('errors.imagesStreamNoFinal'))
 
   let imageResults: ReturnType<typeof parseResponsesImageResults>
   try {
@@ -461,7 +462,7 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
   if (successfulResults.length === 0) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
     if (firstError) throw firstError.reason
-    throw new Error('所有并发请求均失败')
+    throw new Error(i18n.t('errors.concurrentAllFailed'))
   }
 
   const images = successfulResults.flatMap((r) => r.images)
@@ -534,8 +535,8 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
 
       const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
       if (opts.maskDataUrl) {
-        assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
-        assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
+        assertMaskEditFileSize(i18n.t('errors.maskMainFile'), imageBlobs[0]?.size ?? 0)
+        assertMaskEditFileSize(i18n.t('errors.maskFile'), maskBlob?.size ?? 0)
       }
       assertImageInputPayloadSize(
         imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0),
@@ -632,7 +633,7 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
   if (successfulResults.length === 0) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
     if (firstError) throw firstError.reason
-    throw new Error('所有并发请求均失败')
+    throw new Error(i18n.t('errors.concurrentAllFailed'))
   }
 
   const images = successfulResults.flatMap((r) => r.images)
@@ -662,8 +663,8 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
 
   try {
     if (opts.maskDataUrl) {
-      assertMaskEditFileSize('遮罩主图文件', getDataUrlDecodedByteSize(inputImageDataUrls[0] ?? ''))
-      assertMaskEditFileSize('遮罩文件', getDataUrlDecodedByteSize(opts.maskDataUrl))
+      assertMaskEditFileSize(i18n.t('errors.maskMainFile'), getDataUrlDecodedByteSize(inputImageDataUrls[0] ?? ''))
+      assertMaskEditFileSize(i18n.t('errors.maskFile'), getDataUrlDecodedByteSize(opts.maskDataUrl))
     }
     assertImageInputPayloadSize(
       inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlEncodedByteSize(dataUrl), 0) +

@@ -1,4 +1,5 @@
 import { assertUsableMaskCoverage, classifyMaskAlpha, type MaskCoverage } from './mask'
+import i18n from './i18n'
 
 export interface ImageDimensions {
   width: number
@@ -9,7 +10,7 @@ export async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('图片加载失败'))
+    image.onerror = () => reject(new Error(i18n.t('errors.imageLoadFailed')))
     image.src = dataUrl
   })
 }
@@ -31,7 +32,7 @@ export async function imageDataUrlToPngBlob(dataUrl: string): Promise<Blob> {
   canvas.width = image.naturalWidth
   canvas.height = image.naturalHeight
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+  if (!ctx) throw new Error(i18n.t('mask.canvasUnsupported'))
   ctx.drawImage(image, 0, 0)
   return canvasToBlob(canvas, 'image/png')
 }
@@ -47,7 +48,7 @@ export async function maskDataUrlToPngBlob(maskDataUrl: string): Promise<Blob> {
 export async function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png', quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
-      if (!blob) reject(new Error('图片导出失败'))
+      if (!blob) reject(new Error(i18n.t('mask.exportFailed')))
       else resolve(blob)
     }, type, quality)
   })
@@ -56,14 +57,14 @@ export async function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png'
 export async function validateMaskMatchesImage(maskDataUrl: string, imageDataUrl: string): Promise<MaskCoverage> {
   const [maskImage, sourceImage] = await Promise.all([loadImage(maskDataUrl), loadImage(imageDataUrl)])
   if (maskImage.naturalWidth !== sourceImage.naturalWidth || maskImage.naturalHeight !== sourceImage.naturalHeight) {
-    throw new Error('遮罩尺寸与遮罩主图不一致，请重新绘制遮罩')
+    throw new Error(i18n.t('errors.maskSizeMismatch'))
   }
 
   const canvas = document.createElement('canvas')
   canvas.width = maskImage.naturalWidth
   canvas.height = maskImage.naturalHeight
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+  if (!ctx) throw new Error(i18n.t('mask.canvasUnsupported'))
   ctx.drawImage(maskImage, 0, 0)
   const coverage = classifyMaskAlpha(ctx.getImageData(0, 0, canvas.width, canvas.height))
   assertUsableMaskCoverage(coverage)
@@ -73,14 +74,14 @@ export async function validateMaskMatchesImage(maskDataUrl: string, imageDataUrl
 export async function createMaskPreviewDataUrl(imageDataUrl: string, maskDataUrl: string): Promise<string> {
   const [image, mask] = await Promise.all([loadImage(imageDataUrl), loadImage(maskDataUrl)])
   if (image.naturalWidth !== mask.naturalWidth || image.naturalHeight !== mask.naturalHeight) {
-    throw new Error('遮罩尺寸与遮罩主图不一致，请重新绘制遮罩')
+    throw new Error(i18n.t('errors.maskSizeMismatch'))
   }
 
   const canvas = document.createElement('canvas')
   canvas.width = image.naturalWidth
   canvas.height = image.naturalHeight
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+  if (!ctx) throw new Error(i18n.t('mask.canvasUnsupported'))
 
   ctx.drawImage(image, 0, 0)
 
@@ -88,7 +89,7 @@ export async function createMaskPreviewDataUrl(imageDataUrl: string, maskDataUrl
   maskCanvas.width = mask.naturalWidth
   maskCanvas.height = mask.naturalHeight
   const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
-  if (!maskCtx) throw new Error('当前浏览器不支持 Canvas')
+  if (!maskCtx) throw new Error(i18n.t('mask.canvasUnsupported'))
   maskCtx.drawImage(mask, 0, 0)
   const maskPixels = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height)
 
@@ -105,7 +106,7 @@ export async function createMaskPreviewDataUrl(imageDataUrl: string, maskDataUrl
   overlayCanvas.width = canvas.width
   overlayCanvas.height = canvas.height
   const overlayCtx = overlayCanvas.getContext('2d')
-  if (!overlayCtx) throw new Error('当前浏览器不支持 Canvas')
+  if (!overlayCtx) throw new Error(i18n.t('mask.canvasUnsupported'))
   overlayCtx.putImageData(overlay, 0, 0)
   ctx.drawImage(overlayCanvas, 0, 0)
   return canvas.toDataURL('image/png')
