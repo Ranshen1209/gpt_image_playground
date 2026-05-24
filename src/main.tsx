@@ -6,8 +6,20 @@ import 'streamdown/styles.css'
 import 'katex/dist/katex.min.css'
 import './index.css'
 import { installMobileViewportGuards } from './lib/viewport'
+import { handleCallback } from './lib/sakrylleAuth'
 
 installMobileViewportGuards()
+
+if (typeof window !== 'undefined' && window.location.pathname === '/oauth/callback') {
+  const search = new URLSearchParams(window.location.search)
+  handleCallback(search)
+    .catch((err) => {
+      console.error('OAuth callback failed', err)
+    })
+    .finally(() => {
+      window.history.replaceState({}, '', '/')
+    })
+}
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {

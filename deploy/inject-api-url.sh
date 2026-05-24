@@ -2,7 +2,7 @@
 
 # 用环境变量替换前端默认 API URL。显式传入空字符串时保留为空。
 if [ "${DEFAULT_API_URL+x}" != "x" ]; then
-    DEFAULT_API_URL=${API_URL:-https://api.openai.com/v1}
+    DEFAULT_API_URL=${API_URL:-https://api.sakrylle.com/v1}
 fi
 DOCKER_LEGACY_API_URL_USED=${DOCKER_LEGACY_API_URL_USED:-false}
 if [ -n "$API_URL" ]; then

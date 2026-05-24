@@ -1,12 +1,15 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveApiProfile, getAgentImageApiProfile, normalizeSettings } from '../lib/apiProfiles'
-import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
+import { canUseOAuthForProfile } from '../lib/oauthFallback'
+import { getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { isLikelyHeic } from '../lib/heicConvert'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
 import { useHintTooltip } from '../hooks/useHintTooltip'
@@ -385,6 +388,7 @@ function AtImageOptionThumb({ option }: { option: AtImageOption }) {
 }
 
 export default function InputBar() {
+  const { t } = useTranslation()
   const prompt = useStore((s) => s.prompt)
   const appMode = useStore((s) => s.appMode)
   const setPrompt = useStore((s) => s.setPrompt)
@@ -494,8 +498,8 @@ export default function InputBar() {
 
   const handleDeleteSelected = useCallback(() => {
     setConfirmDialog({
-      title: '批量删除',
-      message: `确定要删除选中的 ${selectedTaskIds.length} 个任务吗？`,
+      title: t('input.batchDeleteTitle'),
+      message: t('input.batchDeleteMessage', { count: selectedTaskIds.length }),
       action: () => {
         removeMultipleTasks(selectedTaskIds)
       },
@@ -506,7 +510,7 @@ export default function InputBar() {
     const selectedTasks = tasks.filter((t) => selectedTaskIds.includes(t.id))
     const imageIds = selectedTasks.flatMap(t => t.outputImages || [])
     if (imageIds.length === 0) {
-      showToast('选中的任务没有图片', 'info')
+      showToast(t('input.noImagesSelected'), 'info')
       return
     }
 
@@ -518,15 +522,15 @@ export default function InputBar() {
         : await downloadImageIds(imageIds, fileNameBase)
 
       if (successCount === 0) {
-        showToast('下载失败', 'error')
+        showToast(t('input.downloadFailed'), 'error')
       } else if (failCount > 0) {
-        showToast(`部分下载失败：成功 ${successCount}，失败 ${failCount}`, 'error')
+        showToast(t('input.downloadPartialFailed', { success: successCount, fail: failCount }), 'error')
       } else {
-        showToast(successCount > 1 ? `下载成功：${successCount} 张图片` : '下载成功', 'success')
+        showToast(successCount > 1 ? t('input.downloadSuccessCount', { count: successCount }) : t('input.downloadSuccess'), 'success')
       }
     } catch (err) {
       console.error(err)
-      showToast('下载失败', 'error')
+      showToast(t('input.downloadFailed'), 'error')
     }
     clearSelection()
   }, [tasks, selectedTaskIds, settings.zipDownloadRoutes, showToast, clearSelection])
@@ -616,9 +620,9 @@ export default function InputBar() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const replaceFileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
+  const prevHeightRef = useRef(42)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
-  const prevHeightRef = useRef(42)
 
   const [isDragging, setIsDragging] = useState(false)
   const [isSingleLine, setIsSingleLine] = useState(true)
@@ -710,21 +714,41 @@ export default function InputBar() {
       ? settings
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, settingsActiveProfile.id, settings])
-  const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
+  const [oauthSessionTick, setOauthSessionTick] = useState(0)
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'sakrylle-image-playground.auth') setOauthSessionTick((n) => n + 1)
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+  const hasSubmitApiConfig = useMemo(
+    () => Boolean(activeProfile.apiKey) || canUseOAuthForProfile(activeProfile),
+    // oauthSessionTick re-evaluates canUseOAuthForProfile after login/logout in this tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProfile, oauthSessionTick],
+  )
   const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning)
   const submitButtonAriaLabel = activeAgentIsRunning
-    ? '停止生成'
+    ? t('input.stopGenerating')
     : hasSubmitApiConfig
-    ? maskDraft ? '遮罩编辑' : '生成图像'
-    : '请先配置 API'
-  const submitTooltipText = activeAgentIsRunning ? '停止生成' : '尚未完成 API 配置，请在右上角设置中进行'
-  const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...'
+    ? maskDraft ? t('input.maskEdit') : t('input.generateImage')
+    : t('input.configureApiFirst')
+  const submitTooltipText = activeAgentIsRunning ? t('input.stopGenerationTooltip') : t('input.configureApiTooltip')
+  const promptPlaceholder = t('input.placeholder')
   const submitCurrentMode = useCallback(() => {
-    if (appMode === 'agent') {
-      void submitAgentMessage()
-    } else {
-      void submitTask()
-    }
+    const promise = appMode === 'agent' ? submitAgentMessage() : submitTask()
+    void Promise.resolve(promise).finally(() => {
+      // Force-clear the contentEditable DOM after submit. The store's setPrompt('')
+      // already fires, but the prompt-sync useEffect can race against the lingering
+      // isUserInputRef flag (set true by the last keystroke). Clearing here makes it
+      // deterministic: if the store cleared the prompt, the visible input clears too.
+      const el = textareaRef.current
+      if (el && el.innerHTML !== '' && useStore.getState().prompt === '') {
+        isUserInputRef.current = false
+        el.innerHTML = ''
+      }
+    })
   }, [appMode])
   const stopActiveAgentResponse = useCallback(() => {
     stopAgentResponse(activeAgentConversationId)
@@ -747,33 +771,23 @@ export default function InputBar() {
   const transparentOutputEnabled = transparentOutputAvailable && showTransparentOutputControl && params.transparent_output
   const compressionDisabled = params.output_format === 'png' || isFalProvider
   const outputImageLimit = getOutputImageLimitForSettings(effectiveSettings)
-  const isFalTextToImage = isFalProvider && inputImages.length === 0
+  const isFalTextToImage = false
   const nDraftValue = Number(nInput)
   const effectiveNValue = Number.isNaN(nDraftValue) ? params.n : nDraftValue
   const streamConcurrentByN = activeProfile.provider === 'openai' && activeProfile.streamImages === true && !agentAutoImageCount && effectiveNValue > 1
   const nLimitHintText = agentAutoImageCount
-    ? 'Agent 模式下数量由模型根据提示词自动决定'
-    : isFalProvider
-    ? `fal.ai 最大请求数量为 ${outputImageLimit}`
-    : `OpenAI 最大请求数量为 ${outputImageLimit}`
-  const displaySize = isFalTextToImage && params.size === 'auto'
-    ? DEFAULT_FAL_IMAGE_SIZE
-    : normalizeImageSize(params.size) || DEFAULT_PARAMS.size
+    ? t('input.agentAutoCount')
+    : t('input.maxRequestCount', { limit: outputImageLimit })
+  const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
 
-  const qualityOptions = isFalProvider
-    ? [
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
-    : [
-        { label: 'auto', value: 'auto' },
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
+  const qualityOptions = [
+    { label: 'auto', value: 'auto' },
+    { label: 'low', value: 'low' },
+    { label: 'medium', value: 'medium' },
+    { label: 'high', value: 'high' },
+  ]
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
-  const uploadImageTooltipText = atImageLimit ? `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加` : '上传图片'
+  const uploadImageTooltipText = atImageLimit ? t('input.uploadImageTooltipLimit', { limit: API_MAX_IMAGES }) : t('input.uploadImage')
   const transparentOutputHint = useHintTooltip()
   const handleTransparentOutputMenuOpenChange = useCallback((open: boolean) => {
     if (open) transparentOutputHint.hide()
@@ -797,7 +811,7 @@ export default function InputBar() {
     return getActiveAgentRounds(activeAgentConversation).flatMap((round) =>
       collectAgentRoundOutputImageSlots(round, tasks).flatMap((imageId, imageIndex) => {
         if (!imageId) return []
-        const label = `@第${round.index}轮图${imageIndex + 1}`
+        const label = t('agent.roundImageMention', { round: round.index, image: imageIndex + 1 })
         return {
           type: 'agent-output' as const,
           key: `agent-output:${round.id}:${imageIndex}:${imageId}`,
@@ -948,6 +962,13 @@ export default function InputBar() {
     }
   }, [maskDraft, maskTargetImage?.id, maskTargetImage?.dataUrl])
 
+  // 当 prompt 被外部清空时（如 submitAgentMessage），同步清空 contentEditable
+  useEffect(() => {
+    if (prompt === '' && !isUserInputRef.current && textareaRef.current && textareaRef.current.textContent !== '') {
+      textareaRef.current.innerHTML = ''
+    }
+  }, [prompt])
+
   const commitOutputCompression = useCallback(() => {
     if (outputCompressionInput.trim() === '') {
       setOutputCompressionInput('')
@@ -1080,14 +1101,14 @@ export default function InputBar() {
       const currentCount = useStore.getState().inputImages.length
       if (currentCount >= API_MAX_IMAGES) {
         useStore.getState().showToast(
-          `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`,
+          t('input.uploadImageTooltipLimit', { limit: API_MAX_IMAGES }),
           'error',
         )
         return
       }
 
       const remaining = API_MAX_IMAGES - currentCount
-      const accepted = Array.from(files).filter((f) => f.type.startsWith('image/'))
+      const accepted = Array.from(files).filter((f) => f.type.startsWith('image/') || isLikelyHeic(f))
       const toAdd = accepted.slice(0, remaining)
       const discarded = accepted.length - toAdd.length
 
@@ -1097,13 +1118,13 @@ export default function InputBar() {
 
       if (discarded > 0) {
         useStore.getState().showToast(
-          `已达上限 ${API_MAX_IMAGES} 张，${discarded} 张图片被丢弃`,
+          t('input.imageDiscarded', { limit: API_MAX_IMAGES, discarded }),
           'error',
         )
       }
     } catch (err) {
       useStore.getState().showToast(
-        `图片添加失败：${err instanceof Error ? err.message : String(err)}`,
+        t('input.imageAddFailed', { error: err instanceof Error ? err.message : String(err) }),
         'error',
       )
     }
@@ -1138,12 +1159,12 @@ export default function InputBar() {
     }
 
     setConfirmDialog({
-      title: '编辑参考图',
-      message: '请选择这次要执行的操作。若不勾选下方的选项，则每次都询问；勾选后可在 **设置-习惯配置** 修改选择。',
-      checkbox: { label: '以后默认执行此选择' },
+      title: t('input.editReferenceTitle'),
+      message: t('input.editReferenceMessage'),
+      checkbox: { label: t('input.editReferenceRemember') },
       buttons: [
         {
-          label: '替换参考图',
+          label: t('input.replaceReference'),
           tone: 'secondary',
           action: (remember) => {
             commitReferenceEditChoice('replace-reference', remember)
@@ -1151,7 +1172,7 @@ export default function InputBar() {
           },
         },
         {
-          label: '添加遮罩',
+          label: t('input.addMask'),
           tone: 'primary',
           action: (remember) => {
             commitReferenceEditChoice('add-mask', remember)
@@ -1177,7 +1198,7 @@ export default function InputBar() {
     try {
       const image = await createInputImageFromFile(file)
       if (!image) {
-        showToast('请选择有效图片', 'error')
+        showToast(t('input.selectValidImage'), 'error')
         return
       }
 
@@ -1187,22 +1208,22 @@ export default function InputBar() {
       const previous = currentImages[targetIdx]
       if (!previous) {
         void deleteImageIfUnreferenced(image.id)
-        showToast('原参考图已不存在', 'error')
+        showToast(t('input.originalReferenceMissing'), 'error')
         return
       }
       if (previous.id === image.id) {
-        showToast('参考图未变化', 'info')
+        showToast(t('input.referenceUnchanged'), 'info')
         return
       }
       if (currentImages.some((item, itemIdx) => itemIdx !== targetIdx && item.id === image.id)) {
-        showToast('这张图片已在参考图中', 'info')
+        showToast(t('input.referenceAlreadyAdded'), 'info')
         return
       }
 
       replaceInputImage(targetIdx, image)
-      showToast('参考图已替换', 'success')
+      showToast(t('input.referenceReplaced'), 'success')
     } catch (err) {
-      showToast(`参考图替换失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      showToast(t('input.referenceReplaceFailed', { error: err instanceof Error ? err.message : String(err) }), 'error')
     }
   }
 
@@ -1348,13 +1369,13 @@ export default function InputBar() {
         Promise.all(imageIds.map(async (imageId) => {
           const dataUrl = await ensureImageCached(imageId)
           if (!dataUrl) {
-            showToast('部分图片已不存在', 'error')
+            showToast(t('input.imagesDoesNotExist'), 'error')
             return
           }
           addInputImage({ id: imageId, dataUrl })
         })).then(() => {
-          showToast('已上传图片', 'success')
-        }).catch((err) => showToast(`上传图片失败：${err instanceof Error ? err.message : String(err)}`, 'error'))
+          showToast(t('input.imagesUploaded'), 'success')
+        }).catch((err) => showToast(t('input.uploadImageFailed', { error: err instanceof Error ? err.message : String(err) }), 'error'))
       }
     }
 
@@ -1388,12 +1409,12 @@ export default function InputBar() {
     el.style.overflowY = 'hidden'
     const scrollH = el.scrollHeight
 
+    // 判断是否只有一行
     const placeholderEl = el.parentElement?.querySelector('.prompt-placeholder')
     const placeholderH = placeholderEl ? placeholderEl.scrollHeight : 0
     const minH = Math.max(42, placeholderH)
-
-    const desired = Math.max(scrollH, minH)
-    const targetH = desired > maxH ? maxH : desired
+    const desired = scrollH
+    const targetH = Math.min(desired, maxH)
 
     // 判断是否为单行
     setIsSingleLine(desired <= minH)
@@ -1620,7 +1641,7 @@ export default function InputBar() {
   const renderImageThumb = (img: (typeof inputImages)[number], idx: number) => {
     const isMaskTarget = maskDraft?.targetImageId === img.id
     const canEdit = !maskTargetImage || isMaskTarget
-    const imageHintText = isMaskTarget ? '遮罩图必须为第一张图' : ''
+    const imageHintText = isMaskTarget ? t('input.maskMustBeFirst') : ''
     const displaySrc = isMaskTarget && maskPreviewUrl ? maskPreviewUrl : img.dataUrl
     const isImageDragging = imageDragIndex === idx
     const isLast = idx === inputImages.length - 1
@@ -1769,15 +1790,15 @@ export default function InputBar() {
           text={imageHintText}
         />
         {showDropBefore && (
-          <div className="absolute -left-[5px] top-0 bottom-0 w-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
+          <div className="absolute -left-[5px] top-0 bottom-0 w-[2px] bg-[#9181bd] rounded-full z-40 shadow-sm pointer-events-none" />
         )}
         {showDropAfter && (
-          <div className="absolute -right-[5px] top-0 bottom-0 w-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
+          <div className="absolute -right-[5px] top-0 bottom-0 w-[2px] bg-[#9181bd] rounded-full z-40 shadow-sm pointer-events-none" />
         )}
         <div
           className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing select-none ${
             isMaskTarget
-              ? 'border-2 border-blue-500'
+              ? 'border-2 border-[#9181bd]'
               : 'border border-gray-200 dark:border-white/[0.08]'
           }`}
           onClick={() => {
@@ -1788,7 +1809,7 @@ export default function InputBar() {
             }
             if (maskTargetImage && !maskConflictNoticeShownRef.current) {
               maskConflictNoticeShownRef.current = true
-              showToast('只能有一张遮罩图', 'info')
+              showToast(t('input.onlyOneMask'), 'info')
             }
             setLightboxImageId(img.id, inputImages.map((i) => i.id))
           }}
@@ -1803,7 +1824,7 @@ export default function InputBar() {
             </div>
           )}
           {isMaskTarget && (
-            <span className="absolute left-1 top-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
+            <span className="absolute left-1 top-1 rounded bg-[#9181bd]/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
               MASK
             </span>
           )}
@@ -1817,7 +1838,7 @@ export default function InputBar() {
                 e.stopPropagation()
                 handleEditReferenceImage(img, idx, isMaskTarget)
               }}
-              title={isMaskTarget ? "编辑遮罩" : "编辑"}
+              title={isMaskTarget ? t('input.editMaskTip') : t('input.edit')}
             >
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -1846,20 +1867,20 @@ export default function InputBar() {
     <button
       onClick={() =>
         setConfirmDialog({
-          title: maskTargetImage ? '清空全部输入图' : '清空参考图',
+          title: maskTargetImage ? t('input.clearAllTitle') : t('input.clearReferencesTitle'),
           message: maskTargetImage
-            ? `确定要清空遮罩主图、${referenceImages.length} 张参考图和当前遮罩吗？`
-            : `确定要清空全部 ${inputImages.length} 张参考图吗？`,
+            ? t('input.clearAllMessage', { refCount: referenceImages.length })
+            : t('input.clearReferencesMessage', { count: inputImages.length }),
           action: () => clearInputImages(),
         })
       }
       className="w-[52px] h-[52px] rounded-xl border border-dashed border-gray-300 dark:border-white/[0.08] flex flex-col items-center justify-center gap-0.5 text-gray-400 dark:text-gray-500 hover:text-red-500 hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-950/30 transition-all cursor-pointer flex-shrink-0"
-      title={maskTargetImage ? '清空遮罩主图、参考图和遮罩' : '清空全部参考图'}
+      title={maskTargetImage ? t('input.clearAllTip') : t('input.clearReferencesTip')}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
       </svg>
-      <span className="text-[8px] leading-none">{maskTargetImage ? '清空全部' : '清空'}</span>
+      <span className="text-[8px] leading-none">{maskTargetImage ? t('input.clearAllShort') : t('input.clearShort')}</span>
     </button>
   )
 
@@ -1936,10 +1957,10 @@ export default function InputBar() {
 
       {showSizePicker && (
         <SizePickerModal
-          currentSize={isFalTextToImage && params.size === 'auto' ? DEFAULT_FAL_IMAGE_SIZE : params.size}
+          currentSize={params.size}
           onSelect={(size) => setParams({ size })}
           onClose={() => setShowSizePicker(false)}
-          allowAuto={!isFalTextToImage}
+          allowAuto={true}
         />
       )}
 
@@ -1961,7 +1982,7 @@ export default function InputBar() {
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
         />
-        <div ref={cardRef} className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10">
+        <div ref={cardRef} className="glass-input-shell rounded-[1.75rem] p-4 shadow-[0_12px_32px_rgba(145,129,189,0.16)] sm:rounded-[2rem] sm:p-5">
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
@@ -1988,7 +2009,7 @@ export default function InputBar() {
                 </div>
                 {mobileCollapsed && (
                   <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 ml-1">
-                    {maskDraft ? `1 张遮罩主图 · ${referenceImages.length} 张参考图` : `${inputImages.length} 张参考图`}
+                    {maskDraft ? t('input.mobileMaskMainPlusRefs', { refCount: referenceImages.length }) : t('input.mobileReferenceCount', { count: inputImages.length })}
                   </div>
                 )}
               </>
@@ -2000,8 +2021,8 @@ export default function InputBar() {
           {/* 输入框 */}
           <div className="relative grid">
             {showAtImageMenu && (
-              <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
-                <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
+              <div style={{ left: `${menuLeft}px` }} className="glass-panel absolute bottom-full z-50 mb-3 w-64 overflow-hidden rounded-2xl border border-white/60 p-1.5 shadow-[0_10px_24px_rgba(145,129,189,0.14)] ring-1 ring-white/50 dark:border-white/[0.08] dark:ring-white/10">
+                <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">{t('input.selectImageReference')}</div>
                 <div className="max-h-56 overflow-y-auto custom-scrollbar">
                   {atImageOptions.map((option, optionIndex) => (
                     <button
@@ -2014,13 +2035,13 @@ export default function InputBar() {
                       onMouseEnter={() => setAtImageMenuIndex(optionIndex)}
                       className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs transition-colors ${
                         optionIndex === atImageMenuIndex
-                          ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+                          ? 'bg-[#f1edf8] text-[#7d6cb0] dark:bg-[#9181bd]/10 dark:text-[#c4b8e0]'
                           : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
                         }`}
                     >
                       <AtImageOptionThumb option={option} />
                       <span className="min-w-0 flex-1 truncate font-medium">{option.label}</span>
-                      {option.type === 'agent-output' && <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">历史</span>}
+                      {option.type === 'agent-output' && <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">{t('input.historyBadge')}</span>}
                     </button>
                   ))}
                 </div>
@@ -2071,12 +2092,10 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className="col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30"
+              className="relative z-0 col-start-1 row-start-1 min-h-[42px] max-h-[30vh] w-full ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-300/70 bg-white/95 pl-4 pr-10 py-3 text-[15px] leading-relaxed text-gray-700 shadow-[0_0_0_1px_rgba(24,20,40,0.20),0_8px_18px_rgba(24,20,40,0.18)] outline-none transition-[border-color,box-shadow] duration-200 focus:border-[#b9a9da] focus:shadow-[0_0_0_1px_rgba(91,77,142,0.22),0_10px_22px_rgba(24,20,40,0.20)] dark:border-white/[0.14] dark:bg-white/[0.10] dark:text-gray-100"
             />
             {prompt.length === 0 && (
-              <div className={`prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500${
-                isMobile && mobileCollapsed ? ' truncate' : ''
-              }`}>
+              <div className="prompt-placeholder pointer-events-none relative z-10 col-start-1 row-start-1 flex min-h-[42px] items-center pl-4 pr-10 py-2 text-[15px] font-medium leading-normal text-gray-600 dark:text-gray-300">
                 {promptPlaceholder}
               </div>
             )}
@@ -2087,7 +2106,7 @@ export default function InputBar() {
                 className={`absolute right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.08] rounded-full p-1 transition-all duration-200 focus:outline-none z-10 flex items-center justify-center ${
                   isSingleLine ? 'top-1/2 -translate-y-1/2' : 'top-3'
                 }`}
-                title="清空文本"
+                title={t('input.clearText')}
               >
                 <CloseIcon className="w-3.5 h-3.5" />
               </button>
@@ -2135,7 +2154,7 @@ export default function InputBar() {
                         ? 'bg-red-500 text-white hover:bg-red-600'
                         : !hasSubmitApiConfig
                         ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                        : 'bg-[#9181bd] text-white hover:bg-[#7d6cb0] disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                     aria-label={submitButtonAriaLabel}
                   >
@@ -2198,7 +2217,7 @@ export default function InputBar() {
                         className="fixed inset-0 z-40"
                         onClick={() => setShowMobileUploadMenu(false)}
                       />
-                      <div className="absolute bottom-full left-0 mb-2 w-32 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                      <div className="glass-panel absolute bottom-full left-0 z-50 mb-3 w-32 overflow-hidden rounded-2xl border border-white/60 shadow-[0_10px_24px_rgba(145,129,189,0.14)] animate-in fade-in slide-in-from-bottom-2 duration-200 dark:border-white/[0.08]">
                         <button
                           className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
                           onClick={() => {
@@ -2210,7 +2229,7 @@ export default function InputBar() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
-                          拍照
+                          {t('input.takePhoto')}
                         </button>
                         <button
                           className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
@@ -2222,7 +2241,7 @@ export default function InputBar() {
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                           </svg>
-                          上传图片
+                          {t('input.uploadImage')}
                         </button>
                       </div>
                     </>
@@ -2243,7 +2262,7 @@ export default function InputBar() {
                         ? 'bg-red-500 text-white hover:bg-red-600'
                         : !hasSubmitApiConfig
                         ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                        : 'bg-[#9181bd] text-white hover:bg-[#7d6cb0] disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                   >
                     {activeAgentIsRunning ? (
@@ -2255,7 +2274,7 @@ export default function InputBar() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                       </svg>
                     )}
-                    {activeAgentIsRunning ? '停止生成' : maskDraft ? '遮罩编辑' : '生成图像'}
+                    {activeAgentIsRunning ? t('input.stopGenerating') : maskDraft ? t('input.maskEdit') : t('input.generateImage')}
                   </button>
                 </div>
               </div>

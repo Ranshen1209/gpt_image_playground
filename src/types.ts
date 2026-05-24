@@ -74,6 +74,7 @@ export interface ApiProfile {
   baseUrl: string
   apiKey: string
   model: string
+  responsesModel?: string
   timeout: number
   apiMode: ApiMode
   codexCli: boolean
@@ -81,6 +82,8 @@ export interface ApiProfile {
   responseFormatB64Json?: boolean
   streamImages?: boolean
   streamPartialImages?: number
+  /** Agent 模式图像生成使用的 profile ID（可选）。若指定，Agent 生成图像时切换到该 profile 调用 Images API */
+  imageProfileId?: string
   providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages'>>>>
 }
 

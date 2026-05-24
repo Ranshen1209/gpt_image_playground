@@ -1,5 +1,5 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+const CACHE_NAME = 'sakrylle-image-playground-v0.1.5'
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon-512.png']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

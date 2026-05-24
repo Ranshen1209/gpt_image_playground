@@ -115,7 +115,7 @@ export default function AgentSettingsTab({
           type="number"
           min={1}
           max={50}
-          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
         />
         <div data-selectable-text className="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-500">
           默认 15。用于限制 Agent 连续调用工具时的最大轮数，防止无限循环。
@@ -133,7 +133,7 @@ export default function AgentSettingsTab({
               setAgentMaxToolRoundsInput(String(agentMaxToolRounds))
               commitSettings({ ...draft, agentMaxToolRounds, agentWebSearch: !draft.agentWebSearch })
             }}
-            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${draft.agentWebSearch ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${draft.agentWebSearch ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.agentWebSearch}
             aria-label="网络搜索"

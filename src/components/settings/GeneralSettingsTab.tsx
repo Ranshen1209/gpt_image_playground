@@ -62,7 +62,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, clearInputAfterSubmit: !draft.clearInputAfterSubmit })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.clearInputAfterSubmit}
             aria-label="提交任务后清空输入框"
@@ -115,7 +115,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, persistInputOnRestart: !draft.persistInputOnRestart })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.persistInputOnRestart ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.persistInputOnRestart ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.persistInputOnRestart}
             aria-label="重启后加载上次的输入框"
@@ -133,7 +133,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, reuseTaskApiProfileTemporarily: !draft.reuseTaskApiProfileTemporarily })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.reuseTaskApiProfileTemporarily ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.reuseTaskApiProfileTemporarily ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.reuseTaskApiProfileTemporarily}
             aria-label="复用配置时临时复用该任务的 API 配置"
@@ -151,7 +151,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, alwaysShowRetryButton: !draft.alwaysShowRetryButton })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.alwaysShowRetryButton ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.alwaysShowRetryButton ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.alwaysShowRetryButton}
             aria-label="成功任务仍然展示重试按钮"
@@ -169,7 +169,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, allowPromptRewrite: !draft.allowPromptRewrite })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.allowPromptRewrite ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.allowPromptRewrite ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.allowPromptRewrite}
             aria-label="允许模型改写优化提示词"
@@ -187,7 +187,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => { void toggleTaskCompletionNotification() }}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.taskCompletionNotification ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.taskCompletionNotification ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.taskCompletionNotification}
             aria-label="任务完成后发送系统通知"
@@ -205,7 +205,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, agentScrollToBottomAfterSubmit: !draft.agentScrollToBottomAfterSubmit })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.agentScrollToBottomAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.agentScrollToBottomAfterSubmit ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.agentScrollToBottomAfterSubmit}
             aria-label="发送消息后自动滚动到底部"
@@ -223,7 +223,7 @@ export default function GeneralSettingsTab({
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, agentMathFormattingPrompt: !draft.agentMathFormattingPrompt })}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.agentMathFormattingPrompt ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.agentMathFormattingPrompt ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.agentMathFormattingPrompt}
             aria-label="公式输出提示"

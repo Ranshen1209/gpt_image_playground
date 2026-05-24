@@ -1,6 +1,7 @@
 import { DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type CustomProviderDefinition, type CustomProviderPollMapping, type CustomProviderResultMapping, type CustomProviderSubmitMapping, type ImageApiResponse, type ImageResponseItem, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
+import i18n from './i18n'
 import {
   assertImageInputPayloadSize,
   assertMaskEditFileSize,
@@ -19,11 +20,41 @@ import {
   normalizeBase64Image,
   pickActualParams,
 } from './imageApiShared'
+import { resolveBearerToken } from './oauthFallback'
+import { getSakrylleImageRequestParams } from './sakrylleImageSize'
 
-const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+export const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+
+const IMAGES_GENERATION_PATH = 'images/generations'
+const IMAGES_EDIT_PATH = 'images/edits'
+
+function isSakrylleApiBaseUrl(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === 'api.sakrylle.com'
+  } catch {
+    return baseUrl.toLowerCase().includes('api.sakrylle.com')
+  }
+}
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
+}
+
+/** 并发拆分子请求的最大同时在飞数。实测 api.sakrylle.com 单用户并发墙=6（7+ 触发 429
+ *  "Concurrency limit exceeded for user"），贴墙取 6 最大化吞吐又不撞限速 */
+const MAX_CONCURRENT_IMAGE_REQUESTS = 6
+/** 可重试错误的重试次数 */
+const IMAGE_REQUEST_MAX_RETRIES = 1
+/** 重试前的退避时长（毫秒） */
+const IMAGE_REQUEST_RETRY_DELAY_MS = 800
+/** "凑满 N" 的额外补发预算系数：最多额外补发 N 次（总请求 ≤ 2N），防止持续失败时无限烧钱 */
+const IMAGE_REQUEST_REFILL_BUDGET_FACTOR = 1
+
+function createOpenAICompatiblePaths() {
+  return {
+    generationPath: 'images/generations',
+    editPath: 'images/edits',
+  }
 }
 
 function appendQuery(path: string, query?: Record<string, string>): string {
@@ -31,13 +62,6 @@ function appendQuery(path: string, query?: Record<string, string>): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) params.set(key, value)
   return `${path}${path.includes('?') ? '&' : '?'}${params.toString()}`
-}
-
-function createOpenAICompatiblePaths() {
-  return {
-    generationPath: 'images/generations',
-    editPath: 'images/edits',
-  }
 }
 
 function getByPath(source: unknown, path: string | undefined): unknown {
@@ -76,15 +100,147 @@ function getAllByPath(source: unknown, path: string | undefined): unknown[] {
   return current.flatMap((item) => Array.isArray(item) ? item : [item]).filter((item) => item != null)
 }
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/** worker-pool 并发限流：最多 limit 个同时在飞，结果按输入顺序返回 */
+export async function runWithConcurrency<T>(
+  factories: Array<() => Promise<T>>,
+  limit: number,
+): Promise<PromiseSettledResult<T>[]> {
+  const results = new Array<PromiseSettledResult<T>>(factories.length)
+  let nextIndex = 0
+  const workerCount = Math.max(1, Math.min(limit, factories.length))
+
+  async function worker() {
+    while (nextIndex < factories.length) {
+      const current = nextIndex++
+      try {
+        results[current] = { status: 'fulfilled', value: await factories[current]() }
+      } catch (reason) {
+        results[current] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
+}
+
+/** 判定错误是否值得重试：空闲超时可重试，整体超时和用户取消不可重试 */
+export function isRetryableError(err: unknown): boolean {
+  // 空闲超时:上游卡死,重试可能换账号成功 → 可重试
+  if (err instanceof Error && err.name === 'IdleTimeout') return true
+  // 整体超时:有字节流动但到 600s,真太慢,重试只是再烧时间和钱 → 不可重试
+  if (err instanceof Error && err.name === 'OverallTimeout') return false
+  // 用户主动取消:绝不重试
+  if (err instanceof DOMException && err.name === 'AbortError') return false
+  if (err instanceof TypeError) return true
+  const status = (err as { httpStatus?: unknown } | null)?.httpStatus
+  if (typeof status === 'number') {
+    return status === 429 || status >= 500
+  }
+  return false
+}
+
+const ACCOUNT_POOL_EXHAUSTED_MARKER = 'No available compatible accounts'
+
+function isAccountPoolExhausted(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '')
+  return message.includes(ACCOUNT_POOL_EXHAUSTED_MARKER)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 包裹单次子请求：可重试错误退避后重试，不可重试错误立即抛 */
+export async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = IMAGE_REQUEST_MAX_RETRIES): Promise<T> {
+  let attempt = 0
+  for (;;) {
+    try {
+      return await fn()
+    } catch (err) {
+      if (attempt >= maxRetries || !isRetryableError(err)) throw err
+      attempt++
+      await delay(IMAGE_REQUEST_RETRY_DELAY_MS)
+    }
+  }
+}
+
+/** 从失败数 + 首个错误聚合部分失败信息（凑满 N 后仍有缺口时透出） */
+export function buildPartialFailure(
+  failedCount: number,
+  firstError: unknown,
+): CallApiResult['partialFailure'] {
+  if (failedCount <= 0) return undefined
+  const firstErrorMessage = firstError instanceof Error ? firstError.message : String(firstError ?? '')
+  return { failedCount, firstErrorMessage }
+}
+
+/**
+ * 拆分 + 凑满 N：上游 gpt-image-2 不支持单请求 n>1（实测忽略 n 永远回 1 张），
+ * 必须拆成 n 个 n:1 请求。失败的子请求（含 429 并发墙）补发直到凑满 N 张或耗尽补发预算。
+ * - 每个 slot 固定 [0, n-1]，补发复用失败 slot，保证预览槽位稠密不留空洞
+ * - 并发受 MAX_CONCURRENT_IMAGE_REQUESTS（贴网关并发墙）限流
+ * - 本轮全为不可重试失败（4xx/moderation）且无成功 → 立即停止（补发也没用，省钱）
+ * runSingle(slot) 必须自带 callWithRetry + 成功后 onPartialImage({final}) 推槽位
+ */
+export async function runImageRequestsWithRefill(
+  n: number,
+  runSingle: (slot: number) => Promise<CallApiResult>,
+): Promise<{ resultsBySlot: Array<CallApiResult | undefined>; failedCount: number; firstError: unknown }> {
+  const resultsBySlot = new Array<CallApiResult | undefined>(n).fill(undefined)
+  const maxAttempts = n + n * IMAGE_REQUEST_REFILL_BUDGET_FACTOR
+  let attempts = 0
+  let firstError: unknown
+
+  while (attempts < maxAttempts) {
+    const unfilledSlots: number[] = []
+    for (let slot = 0; slot < n; slot++) {
+      if (!resultsBySlot[slot]) unfilledSlots.push(slot)
+    }
+    if (unfilledSlots.length === 0) break
+
+    const batchSlots = unfilledSlots.slice(0, maxAttempts - attempts)
+    attempts += batchSlots.length
+
+    const results = await runWithConcurrency(
+      batchSlots.map((slot) => () => runSingle(slot)),
+      MAX_CONCURRENT_IMAGE_REQUESTS,
+    )
+
+    let roundSuccess = 0
+    let roundRetryable = 0
+    results.forEach((r, idx) => {
+      if (r.status === 'fulfilled') {
+        resultsBySlot[batchSlots[idx]] = r.value
+        roundSuccess++
+      } else {
+        if (firstError === undefined) firstError = r.reason
+        // 503 账号池枯竭秒回,补发也是空转烧钱 → 不计入可重试
+        if (isRetryableError(r.reason) && !isAccountPoolExhausted(r.reason)) roundRetryable++
+      }
+    })
+
+    // 本轮零成功且失败全不可重试 → 补发无意义，停止
+    if (roundSuccess === 0 && roundRetryable === 0) break
+  }
+
+  return { resultsBySlot, failedCount: resultsBySlot.filter((r) => !r).length, firstError }
+}
+
+
 function normalizeImageApiPayload(value: unknown): ImageApiResponse {
   if (Array.isArray(value)) return { data: value as ImageApiResponse['data'] }
   if (value && typeof value === 'object') return value as ImageApiResponse
   return { data: [] }
 }
 
-function createRequestHeaders(profile: ApiProfile): Record<string, string> {
+async function createRequestHeaders(profile: ApiProfile): Promise<Record<string, string>> {
   return {
-    Authorization: `Bearer ${profile.apiKey}`,
+    Authorization: `Bearer ${await resolveBearerToken(profile)}`,
   }
 }
 
@@ -92,20 +248,16 @@ function isEventStreamResponse(response: Response): boolean {
   return response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream') ?? false
 }
 
-function isRecordValue(value: unknown): value is Record<string, unknown> {
+export function isRecordValue(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function getStringValue(source: Record<string, unknown>, key: string): string | undefined {
+export function getStringValue(source: Record<string, unknown>, key: string): string | undefined {
   const value = source[key]
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
-function getNumberValue(source: Record<string, unknown>, key: string): number | undefined {
+export function getNumberValue(source: Record<string, unknown>, key: string): number | undefined {
   const value = source[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
@@ -120,7 +272,7 @@ function getStreamEventErrorMessage(event: Record<string, unknown>): string | nu
 
   const type = getStringValue(event, 'type')
   if (type?.endsWith('.failed')) {
-    return getStringValue(event, 'message') ?? '流式请求失败'
+    return getStringValue(event, 'message') ?? i18n.t('errors.imagesStreamFailed')
   }
   return null
 }
@@ -138,10 +290,21 @@ function parseServerSentEventBlock(block: string): string | null {
   return data
 }
 
-async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>): Promise<void> {
-  if (!response.body) throw new Error('接口未返回可读取的流式响应')
+export async function readJsonServerSentEvents(
+  response: Response,
+  onEvent: (event: Record<string, unknown>) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!response.body) throw new Error(i18n.t('errors.imagesStreamNoBody'))
 
   const reader = response.body.getReader()
+
+  // When the caller's AbortSignal fires (e.g. idle-timeout or overall-timeout)
+  // cancel the reader so the pending reader.read() rejects immediately rather
+  // than hanging until the next network chunk arrives.
+  const onAbort = () => { reader.cancel().catch(() => {}) }
+  signal?.addEventListener('abort', onAbort, { once: true })
+
   const decoder = new TextDecoder()
   let buffer = ''
   let hasDataLine = false
@@ -165,19 +328,26 @@ async function readJsonServerSentEvents(response: Response, onEvent: (event: Rec
     await onEvent(event)
   }
 
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      // If the reader was cancelled because the AbortSignal fired, throw so
+      // the caller's catch block (which holds the named timeout error) takes over.
+      if (signal?.aborted) throw new DOMException('AbortError', 'AbortError')
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
 
-    let separatorIndex = buffer.search(/\r?\n\r?\n/)
-    while (separatorIndex >= 0) {
-      const block = buffer.slice(0, separatorIndex)
-      const separator = buffer.match(/\r?\n\r?\n/)?.[0] ?? '\n\n'
-      buffer = buffer.slice(separatorIndex + separator.length)
-      await processBlock(block)
-      separatorIndex = buffer.search(/\r?\n\r?\n/)
+      let separatorIndex = buffer.search(/\r?\n\r?\n/)
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex)
+        const separator = buffer.match(/\r?\n\r?\n/)?.[0] ?? '\n\n'
+        buffer = buffer.slice(separatorIndex + separator.length)
+        await processBlock(block)
+        separatorIndex = buffer.search(/\r?\n\r?\n/)
+      }
     }
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
 
   buffer += decoder.decode()
@@ -245,7 +415,7 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
 }> {
   const output = payload.output
   if (!Array.isArray(output) || !output.length) {
-    const err = new Error('接口未返回图片数据')
+    const err = new Error(i18n.t('errors.imageDataMissing'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -266,7 +436,7 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
   }
 
   if (!results.length) {
-    const err = new Error('接口没有返回可识别的图片数据，请查看原始响应内容确认服务商实际返回的数据结构。如果使用的是中转或兼容接口，建议创建并使用「自定义服务商」配置。')
+    const err = new Error(i18n.t('errors.unrecognizedImagePayload'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -295,7 +465,7 @@ function getResponsesImageResultBase64(result: ResponsesOutputItem['result']): s
 async function parseImagesApiResponse(payload: ImageApiResponse, mime: string, signal?: AbortSignal): Promise<CallApiResult> {
   const data = payload.data
   if (!Array.isArray(data) || !data.length) {
-    const err = new Error('接口没有返回图片数据，请查看原始响应内容确认服务商实际返回的数据结构。如果使用的是中转或兼容接口，建议创建并使用「自定义服务商」配置。')
+    const err = new Error(i18n.t('errors.noImagePayload'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -325,7 +495,7 @@ async function parseImagesApiResponse(payload: ImageApiResponse, mime: string, s
   }
 
   if (!images.length) {
-    const err = new Error('接口没有返回可识别的图片数据，请查看原始响应内容确认服务商实际返回的数据结构。如果使用的是中转或兼容接口，建议创建并使用「自定义服务商」配置。')
+    const err = new Error(i18n.t('errors.unrecognizedImagePayload'))
     ;(err as any).rawResponsePayload = JSON.stringify(payload, null, 2)
     throw err
   }
@@ -391,14 +561,14 @@ async function parseImagesApiStreamResponse(
   }
 
   if (!completedItems.length) {
-    throw new Error('流式接口未返回最终图片数据')
+    throw new Error(i18n.t('errors.imagesStreamNoFinal'))
   }
 
   const images = completedItems
     .map((item) => item.b64_json)
     .filter((b64): b64 is string => Boolean(b64))
     .map((b64) => normalizeBase64Image(b64, mime))
-  if (!images.length) throw new Error('流式接口未返回可用图片数据')
+  if (!images.length) throw new Error(i18n.t('errors.imagesStreamNoUsable'))
 
   const actualParamsList = completedItems.map((item) => mergeActualParams(pickActualParams(item)))
   const actualParams = mergeActualParams(
@@ -458,7 +628,7 @@ async function parseResponsesApiStreamResponse(
   })
 
   const payload = completedPayload ?? (outputItems.length ? { output: outputItems } : null)
-  if (!payload) throw new Error('流式接口未返回最终图片数据')
+  if (!payload) throw new Error(i18n.t('errors.imagesStreamNoFinal'))
 
   let imageResults: ReturnType<typeof parseResponsesImageResults>
   try {
@@ -505,26 +675,74 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
       ...(profile.codexCli ? { quality: 'auto' as const } : {}),
     },
   }
-  const results = await Promise.allSettled(
-    Array.from({ length: n }).map((_, requestIndex) => callImagesApiSingle({
+
+  // codexCli mode: simple Promise.allSettled, no retry/refill, returns failedRequests per slot
+  if (profile.codexCli) {
+    const results = await Promise.allSettled(
+      Array.from({ length: n }).map((_, requestIndex) => callImagesApiSingle({
+        ...singleOpts,
+        onPartialImage: opts.onPartialImage
+          ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
+          : undefined,
+      }, profile)),
+    )
+
+    const successfulResults = results
+      .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
+      .map((r) => r.value)
+    const failedRequests = results.flatMap((r, requestIndex) =>
+      r.status === 'rejected' ? [{ requestIndex, error: getErrorMessage(r.reason) }] : [],
+    )
+
+    if (successfulResults.length === 0) {
+      const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+      if (firstError) throw firstError.reason
+      throw new Error(i18n.t('errors.concurrentAllFailed'))
+    }
+
+    const images = successfulResults.flatMap((r) => r.images)
+    const actualParamsList = successfulResults.flatMap((r) =>
+      r.actualParamsList?.length ? r.actualParamsList : r.images.map(() => r.actualParams),
+    )
+    const revisedPrompts = successfulResults.flatMap((r) =>
+      r.revisedPrompts?.length ? r.revisedPrompts : r.images.map(() => undefined),
+    )
+    const rawImageUrls = successfulResults.flatMap((r) => r.rawImageUrls ?? [])
+    const actualParams = mergeActualParams(
+      successfulResults[0]?.actualParams ?? {},
+      { n: images.length },
+    )
+
+    return {
+      images,
+      actualParams,
+      actualParamsList,
+      revisedPrompts,
+      ...(rawImageUrls.length ? { rawImageUrls } : {}),
+      ...(failedRequests.length ? { failedRequests } : {}),
+    }
+  }
+
+  // Sakrylle streaming split: runImageRequestsWithRefill with retry/refill, returns partialFailure
+  const { resultsBySlot, failedCount, firstError } = await runImageRequestsWithRefill(n, (slot) =>
+    callWithRetry(() => callImagesApiSingle({
       ...singleOpts,
       onPartialImage: opts.onPartialImage
-        ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
+        ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex: slot })
         : undefined,
-    }, profile)),
+    }, profile)).then((result) => {
+      // 子请求完成即把成品图推进对应预览槽位，无需等其余子请求
+      const finalImage = result.images[0]
+      if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex: slot, final: true })
+      return result
+    }),
   )
 
-  const successfulResults = results
-    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
-  const failedRequests = results.flatMap((r, requestIndex) =>
-    r.status === 'rejected' ? [{ requestIndex, error: getErrorMessage(r.reason) }] : [],
-  )
+  const successfulResults = resultsBySlot.filter((r): r is CallApiResult => Boolean(r))
 
   if (successfulResults.length === 0) {
-    const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-    if (firstError) throw firstError.reason
-    throw new Error('所有并发请求均失败')
+    if (firstError) throw firstError
+    throw new Error(i18n.t('errors.concurrentAllFailed'))
   }
 
   const images = successfulResults.flatMap((r) => r.images)
@@ -539,6 +757,7 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
     successfulResults[0]?.actualParams ?? {},
     { n: images.length },
   )
+  const partialFailure = buildPartialFailure(failedCount, firstError)
 
   return {
     images,
@@ -546,21 +765,22 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
     actualParamsList,
     revisedPrompts,
     ...(rawImageUrls.length ? { rawImageUrls } : {}),
-    ...(failedRequests.length ? { failedRequests } : {}),
+    ...(partialFailure ? { partialFailure } : {}),
   }
 }
 
 async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
-  const { prompt: originalPrompt, params, inputImageDataUrls } = opts
+  const { prompt: originalPrompt, inputImageDataUrls } = opts
+  const params = getSakrylleImageRequestParams(opts.params, profile)
   const prompt = profile.codexCli && !opts.settings.allowPromptRewrite
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${originalPrompt}`
     : originalPrompt
   const isEdit = inputImageDataUrls.length > 0
+  const shouldStreamImages = profile.streamImages && !(isEdit && isSakrylleApiBaseUrl(profile.baseUrl))
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
-  const requestHeaders = createRequestHeaders(profile)
-  const paths = createOpenAICompatiblePaths()
+  const requestHeaders = await createRequestHeaders(profile)
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
@@ -589,7 +809,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       if (profile.responseFormatB64Json) {
         formData.append('response_format', 'b64_json')
       }
-      if (profile.streamImages) {
+      if (shouldStreamImages) {
         formData.append('stream', 'true')
         formData.append('partial_images', String(getStreamPartialImages(profile)))
       }
@@ -605,8 +825,8 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
 
       const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
       if (opts.maskDataUrl) {
-        assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
-        assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
+        assertMaskEditFileSize(i18n.t('errors.maskMainFile'), imageBlobs[0]?.size ?? 0)
+        assertMaskEditFileSize(i18n.t('errors.maskFile'), maskBlob?.size ?? 0)
       }
       assertImageInputPayloadSize(
         imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0),
@@ -622,7 +842,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
         formData.append('mask', maskBlob, 'mask.png')
       }
 
-      response = await fetch(buildApiUrl(profile.baseUrl, paths.editPath, proxyConfig, useApiProxy), {
+      response = await fetch(buildApiUrl(profile.baseUrl, IMAGES_EDIT_PATH, proxyConfig, useApiProxy), {
         method: 'POST',
         headers: requestHeaders,
         cache: 'no-store',
@@ -651,12 +871,12 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       if (profile.responseFormatB64Json) {
         body.response_format = 'b64_json'
       }
-      if (profile.streamImages) {
+      if (shouldStreamImages) {
         body.stream = true
         body.partial_images = getStreamPartialImages(profile)
       }
 
-      response = await fetch(buildApiUrl(profile.baseUrl, paths.generationPath, proxyConfig, useApiProxy), {
+      response = await fetch(buildApiUrl(profile.baseUrl, IMAGES_GENERATION_PATH, proxyConfig, useApiProxy), {
         method: 'POST',
         headers: {
           ...requestHeaders,
@@ -838,7 +1058,7 @@ async function extractCustomImages(payload: unknown, result: CustomProviderResul
 }
 
 async function submitCustomRequest(mapping: CustomProviderSubmitMapping, opts: CallApiOptions, profile: ApiProfile, controller: AbortController, proxyConfig: ReturnType<typeof readClientDevProxyConfig>, useApiProxy: boolean): Promise<unknown> {
-  const requestHeaders = createRequestHeaders(profile)
+  const requestHeaders = await createRequestHeaders(profile)
   const context = createCustomProviderContext(opts, profile)
   const method = mapping.method ?? 'POST'
   const contentType = mapping.contentType ?? 'json'
@@ -887,7 +1107,7 @@ async function pollCustomTaskResult(
   signal?: AbortSignal,
 ): Promise<CallApiResult> {
   const proxyConfig = readClientDevProxyConfig()
-  const requestHeaders = createRequestHeaders(profile)
+  const requestHeaders = await createRequestHeaders(profile)
   let isFirstPoll = true
 
   while (true) {
@@ -998,7 +1218,7 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
       : undefined,
   }, profile))
   const results = await Promise.allSettled(promises)
-  
+
   const successfulResults = results
     .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
     .map((r) => r.value)
@@ -1007,9 +1227,9 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
   )
 
   if (successfulResults.length === 0) {
-    const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-    if (firstError) throw firstError.reason
-    throw new Error('所有并发请求均失败')
+    const firstRejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (firstRejected) throw firstRejected.reason
+    throw new Error(i18n.t('errors.concurrentAllFailed'))
   }
 
   const images = successfulResults.flatMap((r) => r.images)
@@ -1036,18 +1256,19 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
 }
 
 async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
-  const { prompt, params, inputImageDataUrls } = opts
+  const { prompt, inputImageDataUrls } = opts
+  const params = getSakrylleImageRequestParams(opts.params, profile)
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
-  const requestHeaders = createRequestHeaders(profile)
+  const requestHeaders = await createRequestHeaders(profile)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
     if (opts.maskDataUrl) {
-      assertMaskEditFileSize('遮罩主图文件', getDataUrlDecodedByteSize(inputImageDataUrls[0] ?? ''))
-      assertMaskEditFileSize('遮罩文件', getDataUrlDecodedByteSize(opts.maskDataUrl))
+      assertMaskEditFileSize(i18n.t('errors.maskMainFile'), getDataUrlDecodedByteSize(inputImageDataUrls[0] ?? ''))
+      assertMaskEditFileSize(i18n.t('errors.maskFile'), getDataUrlDecodedByteSize(opts.maskDataUrl))
     }
     assertImageInputPayloadSize(
       inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlEncodedByteSize(dataUrl), 0) +
