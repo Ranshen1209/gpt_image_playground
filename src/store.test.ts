@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { DEFAULT_PARAMS } from './types'
-import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
+import { createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 vi.mock('./lib/db', () => {
@@ -232,11 +232,9 @@ describe('interrupted OpenAI running tasks', () => {
     const now = 10_000
     const legacyRunning = task({ id: 'legacy-running', status: 'running', createdAt: 1_000, finishedAt: null, elapsed: null })
     const openAIRunning = task({ id: 'openai-running', apiProvider: 'openai', status: 'running', createdAt: 2_000, finishedAt: null, elapsed: null })
-    const falRunning = task({ id: 'fal-running', apiProvider: 'fal', status: 'running', createdAt: 3_000, finishedAt: null, elapsed: null })
-    const customAsyncRunning = task({ id: 'custom-running', apiProvider: 'custom-provider', customTaskId: 'task-1', status: 'running', createdAt: 4_000, finishedAt: null, elapsed: null })
     const doneTask = task({ id: 'done-task', apiProvider: 'openai', status: 'done' })
 
-    const result = markInterruptedOpenAIRunningTasks([legacyRunning, openAIRunning, falRunning, customAsyncRunning, doneTask], now)
+    const result = markInterruptedOpenAIRunningTasks([legacyRunning, openAIRunning, doneTask], now)
 
     expect(result.interruptedTasks.map((item) => item.id)).toEqual(['legacy-running', 'openai-running'])
     expect(result.tasks.find((item) => item.id === 'legacy-running')).toMatchObject({
@@ -251,8 +249,6 @@ describe('interrupted OpenAI running tasks', () => {
       finishedAt: now,
       elapsed: 8_000,
     })
-    expect(result.tasks.find((item) => item.id === 'fal-running')).toEqual(falRunning)
-    expect(result.tasks.find((item) => item.id === 'custom-running')).toEqual(customAsyncRunning)
     expect(result.tasks.find((item) => item.id === 'done-task')).toEqual(doneTask)
   })
 })
@@ -1629,131 +1625,3 @@ describe('agent assistant regeneration', () => {
   })
 })
 
-describe('reused task API profile', () => {
-  const openaiProfile = createDefaultOpenAIProfile({ id: 'openai-profile', apiKey: 'openai-key' })
-  const falProfile = createDefaultFalProfile({ id: 'fal-profile', name: 'fal 配置', apiKey: 'fal-key' })
-
-  beforeEach(() => {
-    useStore.setState({
-      settings: normalizeSettings({
-        ...DEFAULT_SETTINGS,
-        profiles: [openaiProfile, falProfile],
-        activeProfileId: openaiProfile.id,
-        reuseTaskApiProfileTemporarily: true,
-      }),
-      prompt: '',
-      inputImages: [],
-      maskDraft: null,
-      params: { ...DEFAULT_PARAMS },
-      tasks: [],
-      showSettings: false,
-      toast: null,
-      reusedTaskApiProfileId: null,
-      reusedTaskApiProfileName: null,
-      reusedTaskApiProfileMissing: false,
-      showToast: vi.fn(),
-      setConfirmDialog: vi.fn(),
-    })
-  })
-
-  it('resolves a task API profile by stored profile id', () => {
-    const resolved = getTaskApiProfile(useStore.getState().settings, task({ apiProvider: 'fal', apiProfileId: falProfile.id }))
-
-    expect(resolved?.id).toBe(falProfile.id)
-  })
-
-  it('does not resolve a task API profile by stored name or model', () => {
-    const resolved = getTaskApiProfile(useStore.getState().settings, task({
-      apiProvider: 'fal',
-      apiProfileName: falProfile.name,
-      apiModel: falProfile.model,
-    }))
-
-    expect(resolved).toBeNull()
-  })
-
-  it('reuses the task API profile temporarily without switching the active profile', async () => {
-    await reuseConfig(task({
-      apiProvider: 'fal',
-      apiProfileId: falProfile.id,
-      params: { ...DEFAULT_PARAMS, n: 8, size: 'auto', quality: 'auto' },
-    }))
-
-    const state = useStore.getState()
-    expect(state.settings.activeProfileId).toBe(openaiProfile.id)
-    expect(state.reusedTaskApiProfileId).toBe(falProfile.id)
-    expect(state.params).toMatchObject({ n: 4, size: '1360x1024', quality: 'high' })
-    expect(state.showToast).toHaveBeenCalledWith('已临时复用该任务的 API 配置「fal 配置」', 'success')
-  })
-
-  it('keeps selected image mentions when reusing a task with different current input images', async () => {
-    await clearImages()
-    await putImage(imageA)
-    await putImage(imageB)
-    const taskPrompt = `参考 ${getSelectedImageMentionLabel(1)} 生成`
-
-    useStore.setState({
-      prompt: `当前 ${getSelectedImageMentionLabel(1)}`,
-      inputImages: [
-        { id: 'current-x', dataUrl: 'data:image/png;base64,x' },
-        { id: 'current-y', dataUrl: 'data:image/png;base64,y' },
-      ],
-    })
-
-    await reuseConfig(task({
-      apiProvider: 'openai',
-      apiProfileId: openaiProfile.id,
-      prompt: taskPrompt,
-      inputImageIds: [imageA.id, imageB.id],
-    }))
-
-    const state = useStore.getState()
-    expect(state.inputImages.map((img) => img.id)).toEqual([imageA.id, imageB.id])
-    expect(state.prompt).toBe(taskPrompt)
-  })
-
-  it('clears temporary reuse when switching current settings to the reused API profile', async () => {
-    await reuseConfig(task({ apiProvider: 'fal', apiProfileId: falProfile.id }))
-
-    useStore.getState().setSettings({ activeProfileId: falProfile.id })
-
-    const state = useStore.getState()
-    expect(state.settings.activeProfileId).toBe(falProfile.id)
-    expect(state.reusedTaskApiProfileId).toBeNull()
-    expect(state.reusedTaskApiProfileMissing).toBe(false)
-  })
-
-  it('normalizes reused params to the current API profile when temporary reuse is disabled', async () => {
-    useStore.setState({
-      settings: normalizeSettings({
-        ...useStore.getState().settings,
-        reuseTaskApiProfileTemporarily: false,
-      }),
-    })
-
-    await reuseConfig(task({
-      apiProvider: 'fal',
-      apiProfileId: falProfile.id,
-      params: { ...DEFAULT_PARAMS, n: 8, size: 'auto', quality: 'auto' },
-    }))
-
-    const state = useStore.getState()
-    expect(state.settings.activeProfileId).toBe(openaiProfile.id)
-    expect(state.reusedTaskApiProfileId).toBeNull()
-    expect(state.params).toMatchObject({ n: 8, size: 'auto', quality: 'auto' })
-  })
-
-  it('asks whether to submit with current API profile when the reused API profile is missing', async () => {
-    await reuseConfig(task({ apiProvider: 'fal', apiProfileId: 'missing-profile' }))
-
-    const state = useStore.getState()
-    expect(state.tasks).toEqual([])
-    expect(state.setConfirmDialog).toHaveBeenCalledWith(expect.objectContaining({
-      title: '找不到 API 配置',
-      message: '找不到复用任务所使用的 API 配置「未知配置」，要使用当前的 API 配置「默认」提交任务吗？',
-      confirmText: '使用当前配置提交',
-      cancelText: '放弃提交',
-    }))
-    expect(state.showSettings).toBe(false)
-  })
-})

@@ -7,6 +7,8 @@ import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
 import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
+import { fetchBalance, formatCny, type SakrylleBalance } from '../lib/sakrylleAccount'
+import { getStoredToken } from '../lib/sakrylleAuth'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -84,6 +86,25 @@ export default function Header() {
   const installTooltip = useTooltip()
   const helpTooltip = useTooltip()
   const settingsTooltip = useTooltip()
+  const [balance, setBalance] = useState<SakrylleBalance | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      if (!getStoredToken()) {
+        if (!cancelled) setBalance(null)
+        return
+      }
+      const next = await fetchBalance()
+      if (!cancelled) setBalance(next)
+    }
+    void refresh()
+    const id = window.setInterval(refresh, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -149,12 +170,12 @@ export default function Header() {
           <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
             <h1 className="inline-flex items-start relative mr-2">
               <a
-                href="https://github.com/CookSleep/gpt_image_playground"
+                href="https://github.com/Ranshen1209/gpt_image_playground"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[17px] sm:text-lg font-bold tracking-tight text-gray-800 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               >
-                GPT Image Playground
+                Sakrylle 图像工坊
               </a>
               {hasUpdate && latestRelease && (
                 <a
@@ -229,6 +250,16 @@ export default function Header() {
             </button>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {balance && (
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.04] transition-colors"
+                title={`${balance.username} · ${balance.groupName}`}
+              >
+                {formatCny(balance.creditRemainingCny)}
+              </button>
+            )}
             {!isPwaInstalled && (
               <div
                 className="relative"

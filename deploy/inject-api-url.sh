@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # 用环境变量替换前端默认 API URL
-DEFAULT_API_URL=${DEFAULT_API_URL:-${API_URL:-https://api.openai.com/v1}}
+DEFAULT_API_URL=${DEFAULT_API_URL:-${API_URL:-https://api.sakrylle.com/v1}}
 DOCKER_LEGACY_API_URL_USED=${DOCKER_LEGACY_API_URL_USED:-false}
 if [ -n "$API_URL" ]; then
     DOCKER_LEGACY_API_URL_USED=true

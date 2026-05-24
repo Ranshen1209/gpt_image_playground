@@ -6,8 +6,8 @@ if [ -n "$API_URL" ]; then
     DOCKER_LEGACY_API_URL_USED=true
 fi
 
-DEFAULT_API_URL=${DEFAULT_API_URL:-${API_URL:-https://api.openai.com/v1}}
-API_PROXY_URL=${API_PROXY_URL:-${API_URL:-https://api.openai.com/v1}}
+DEFAULT_API_URL=${DEFAULT_API_URL:-${API_URL:-https://api.sakrylle.com/v1}}
+API_PROXY_URL=${API_PROXY_URL:-${API_URL:-https://api.sakrylle.com/v1}}
 
 export DEFAULT_API_URL
 export API_PROXY_URL
