@@ -10,7 +10,7 @@ export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputE
 export function Checkbox({ checked, onChange, label, tone = 'primary', className, ...props }: CheckboxProps) {
   const toneClasses = tone === 'danger'
     ? 'border-red-300/60 checked:bg-red-500 checked:border-red-500 focus:ring-red-500/20 dark:border-red-500/30'
-    : 'border-gray-300 checked:bg-blue-500 checked:border-blue-500 focus:ring-blue-500/20 dark:border-white/15'
+    : 'border-gray-300 checked:bg-[#9181bd] checked:border-[#9181bd] focus:ring-[#9181bd]/20 dark:border-white/15'
 
   return (
     <label className={`flex items-center gap-2 cursor-pointer group ${className || ''}`}>

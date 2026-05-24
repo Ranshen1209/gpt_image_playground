@@ -1,10 +1,12 @@
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { CloseIcon } from './icons'
 
 export default function SupportPromptModal() {
+  const { t } = useTranslation()
   const supportPromptOpen = useStore((s) => s.supportPromptOpen)
   const dismissSupportPrompt = useStore((s) => s.dismissSupportPrompt)
   const confirmDialog = useStore((s) => s.confirmDialog)
@@ -39,7 +41,7 @@ export default function SupportPromptModal() {
             type="button"
             onClick={dismissSupportPrompt}
             className="rounded-full p-2 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-            aria-label="关闭"
+            aria-label={t('support.closeAria')}
           >
             <CloseIcon className="h-5 w-5" />
           </button>
@@ -54,13 +56,13 @@ export default function SupportPromptModal() {
         </div>
 
         <h3 className="mb-3 text-center text-xl font-bold text-gray-800 dark:text-gray-100">
-          感谢使用 🎉
+          {t('support.thanks')}
         </h3>
 
         <p className="mb-8 px-2 text-center text-[15px] leading-relaxed text-gray-500 dark:text-gray-400">
-          你已经成功生成了超过 <strong className="font-semibold text-gray-800 dark:text-gray-200">50</strong> 张图片！<br />
-          如果这个工具对你有所帮助，<br />
-          欢迎赞助作者，或反馈分享你的建议。
+          {t('support.imagesCountPrefix')}<strong className="font-semibold text-gray-800 dark:text-gray-200">50</strong>{t('support.imagesCountMiddle')}<br />
+          {t('support.supportLine1')}<br />
+          {t('support.supportLine2')}
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -74,7 +76,7 @@ export default function SupportPromptModal() {
             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
             </svg>
-            赞助作者
+            {t('support.sponsor')}
           </a>
           <a
             href="https://github.com/CookSleep/gpt_image_playground/issues"
@@ -86,7 +88,7 @@ export default function SupportPromptModal() {
             <svg className="h-[18px] w-[18px] opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
             </svg>
-            反馈问题
+            {t('support.feedback')}
           </a>
         </div>
       </div>
