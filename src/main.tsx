@@ -5,6 +5,7 @@ import App from './App'
 import 'streamdown/styles.css'
 import 'katex/dist/katex.min.css'
 import './index.css'
+import './lib/i18n'
 import { installMobileViewportGuards } from './lib/viewport'
 import { handleCallback } from './lib/sakrylleAuth'
 
@@ -13,8 +14,12 @@ installMobileViewportGuards()
 if (typeof window !== 'undefined' && window.location.pathname === '/oauth/callback') {
   const search = new URLSearchParams(window.location.search)
   handleCallback(search)
-    .catch((err) => {
-      console.error('OAuth callback failed', err)
+    .catch((err: unknown) => {
+      // Log only the error message — full error objects from the OAuth path
+      // can carry server descriptions that include token fragments. Keep
+      // production logs free of sensitive material.
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      console.error('OAuth callback failed:', message)
     })
     .finally(() => {
       window.history.replaceState({}, '', '/')
