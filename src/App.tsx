@@ -1,8 +1,11 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { initStore } from './store'
 import { useStore } from './store'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
+import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken } from './lib/sakrylleAuth'
+import { applyThemeClass, readStoredTheme } from './lib/theme'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
@@ -18,8 +21,12 @@ import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
 
+const SAKRYLLE_FIRST_VISIT_KEY = 'sakrylle-image-playground.first-visit-prompted'
+
 export default function App() {
+  const { t } = useTranslation()
   const setSettings = useStore((s) => s.setSettings)
+  const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const appMode = useStore((s) => s.appMode)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
@@ -40,6 +47,50 @@ export default function App() {
 
     initStore()
   }, [setSettings])
+
+  useEffect(() => {
+    applyThemeClass(readStoredTheme())
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.location.pathname.startsWith('/oauth/callback')) return
+    if (sakrylleGetStoredToken()) return
+
+    let prompted = false
+    try {
+      prompted = window.localStorage.getItem(SAKRYLLE_FIRST_VISIT_KEY) === '1'
+    } catch {
+      prompted = false
+    }
+    if (prompted) return
+
+    try {
+      window.localStorage.setItem(SAKRYLLE_FIRST_VISIT_KEY, '1')
+    } catch {
+      // ignore
+    }
+
+    setConfirmDialog({
+      title: t('welcome.title'),
+      message: t('welcome.message'),
+      icon: 'info',
+      buttons: [
+        {
+          label: t('welcome.skip'),
+          tone: 'secondary',
+          action: () => {},
+        },
+        {
+          label: t('welcome.login'),
+          tone: 'primary',
+          action: () => {
+            void sakrylleBeginLogin()
+          },
+        },
+      ],
+    })
+  }, [setConfirmDialog, t])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {

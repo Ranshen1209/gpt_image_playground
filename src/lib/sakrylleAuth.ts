@@ -1,7 +1,8 @@
 // Sakrylle OAuth 2.0 Authorization Code + PKCE flow.
 // 与 sub.sakrylle.com 的 /oauth/authorize、/oauth/token 端点对接。
-// 详见 docs/SAKRYLLE_API_SPEC.md。
+// 详见 docs/OAUTH_CLIENT_INTEGRATION.md (§2, §4)。
 
+import i18n from './i18n'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const OAUTH_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_BASE) || 'https://sub.sakrylle.com'
@@ -11,13 +12,21 @@ const SCOPE = 'image_generation balance:read models:read'
 const AUTH_STORAGE_KEY = 'sakrylle-image-playground.auth'
 const PKCE_VERIFIER_KEY = 'sakrylle-image-playground.pkce-verifier'
 const PKCE_STATE_KEY = 'sakrylle-image-playground.pkce-state'
-const ENDPOINT_AVAILABLE_CACHE_KEY = 'sakrylle-image-playground.oauth-available'
-const ENDPOINT_AVAILABLE_TTL_MS = 5 * 60 * 1000
+
+const REFRESH_LEAD_TIME_MS = 60_000
+const DEFAULT_TOKEN_TTL_SECONDS = 86_400
 
 export interface SakrylleAuthToken {
   accessToken: string
   refreshToken?: string
   expiresAt: number
+  scope?: string
+}
+
+interface OAuthTokenResponse {
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
   scope?: string
 }
 
@@ -51,6 +60,25 @@ function generateState(): string {
   return base64UrlEncode(random.buffer)
 }
 
+function tokenFromPayload(
+  payload: OAuthTokenResponse,
+  opts: { requireRefresh: boolean; previousScope?: string },
+): SakrylleAuthToken {
+  // docs §2.1 — authorization_code grant must return refresh_token.
+  // docs §2.4 — refresh_token must rotate on every refresh. If the server
+  // omits it, that is a protocol violation: keeping the old value will be
+  // revoked on the next call. Surface as terminal error.
+  if (opts.requireRefresh && !payload.refresh_token) {
+    throw new Error('OAuth refresh_token rotation missing — terminal')
+  }
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresAt: Date.now() + (payload.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
+    scope: payload.scope ?? opts.previousScope,
+  }
+}
+
 export async function beginLogin(): Promise<void> {
   const verifier = await generatePkceVerifier()
   const challenge = await pkceChallengeFromVerifier(verifier)
@@ -78,9 +106,9 @@ export async function handleCallback(searchParams: URLSearchParams): Promise<Sak
   sessionStorage.removeItem(PKCE_STATE_KEY)
   sessionStorage.removeItem(PKCE_VERIFIER_KEY)
 
-  if (!code) throw new Error('OAuth 回调缺少授权码')
-  if (!state || state !== expectedState) throw new Error('OAuth state 不匹配，可能存在 CSRF 风险')
-  if (!verifier) throw new Error('找不到 PKCE verifier，请重新登录')
+  if (!code) throw new Error(i18n.t('errors.oauthMissingCode'))
+  if (!state || state !== expectedState) throw new Error(i18n.t('errors.oauthStateMismatch'))
+  if (!verifier) throw new Error(i18n.t('errors.oauthMissingVerifier'))
 
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
@@ -96,20 +124,14 @@ export async function handleCallback(searchParams: URLSearchParams): Promise<Sak
   })
   if (!response.ok) {
     const message = await response.text().catch(() => '')
-    throw new Error(`换取 access_token 失败：HTTP ${response.status}${message ? ` ${message}` : ''}`)
+    throw new Error(i18n.t('errors.oauthExchangeFailed', {
+      status: response.status,
+      detail: message ? ` ${message}` : '',
+    }))
   }
-  const payload = await response.json() as {
-    access_token: string
-    refresh_token?: string
-    expires_in?: number
-    scope?: string
-  }
-  const token: SakrylleAuthToken = {
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token,
-    expiresAt: Date.now() + (payload.expires_in ?? 86400) * 1000,
-    scope: payload.scope,
-  }
+  const payload = await response.json() as OAuthTokenResponse
+  // docs §2.1 — authorization_code grant must return refresh_token.
+  const token = tokenFromPayload(payload, { requireRefresh: true })
   saveToken(token)
   return token
 }
@@ -139,10 +161,7 @@ export function logout(): void {
   window.sessionStorage.removeItem(PKCE_STATE_KEY)
 }
 
-export async function refreshIfNeeded(): Promise<SakrylleAuthToken | null> {
-  const token = getStoredToken()
-  if (!token) return null
-  if (Date.now() < token.expiresAt - 60_000) return token
+async function performRefresh(token: SakrylleAuthToken): Promise<SakrylleAuthToken | null> {
   if (!token.refreshToken) {
     logout()
     return null
@@ -160,18 +179,10 @@ export async function refreshIfNeeded(): Promise<SakrylleAuthToken | null> {
       body,
     })
     if (!response.ok) throw new Error(`refresh_token 失败 HTTP ${response.status}`)
-    const payload = await response.json() as {
-      access_token: string
-      refresh_token?: string
-      expires_in?: number
-      scope?: string
-    }
-    const next: SakrylleAuthToken = {
-      accessToken: payload.access_token,
-      refreshToken: payload.refresh_token ?? token.refreshToken,
-      expiresAt: Date.now() + (payload.expires_in ?? 86400) * 1000,
-      scope: payload.scope ?? token.scope,
-    }
+    const payload = await response.json() as OAuthTokenResponse
+    // docs §2.4 — strict rotation: tokenFromPayload throws if refresh_token
+    // is missing. Any error here is terminal per §4.3.
+    const next = tokenFromPayload(payload, { requireRefresh: true, previousScope: token.scope })
     saveToken(next)
     return next
   } catch {
@@ -180,44 +191,18 @@ export async function refreshIfNeeded(): Promise<SakrylleAuthToken | null> {
   }
 }
 
-interface EndpointAvailabilityCache {
-  available: boolean
-  checkedAt: number
+// Refresh only when the access token is within REFRESH_LEAD_TIME_MS of expiry.
+export async function refreshIfNeeded(): Promise<SakrylleAuthToken | null> {
+  const token = getStoredToken()
+  if (!token) return null
+  if (Date.now() < token.expiresAt - REFRESH_LEAD_TIME_MS) return token
+  return performRefresh(token)
 }
 
-export async function isOAuthEndpointAvailable(): Promise<boolean> {
-  if (typeof window === 'undefined') return false
-  const cached = readEndpointCache()
-  if (cached && Date.now() - cached.checkedAt < ENDPOINT_AVAILABLE_TTL_MS) {
-    return cached.available
-  }
-
-  let available = false
-  try {
-    const response = await fetch(`${OAUTH_BASE}/oauth/authorize`, { method: 'HEAD', mode: 'cors' })
-    available = response.ok || response.status === 405 || response.status === 400
-  } catch {
-    available = false
-  }
-
-  writeEndpointCache({ available, checkedAt: Date.now() })
-  return available
-}
-
-function readEndpointCache(): EndpointAvailabilityCache | null {
-  try {
-    const raw = window.sessionStorage.getItem(ENDPOINT_AVAILABLE_CACHE_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as EndpointAvailabilityCache
-  } catch {
-    return null
-  }
-}
-
-function writeEndpointCache(cache: EndpointAvailabilityCache) {
-  try {
-    window.sessionStorage.setItem(ENDPOINT_AVAILABLE_CACHE_KEY, JSON.stringify(cache))
-  } catch {
-    // ignore
-  }
+// Force a refresh regardless of expiry — used when /v1/* returns OAuth-shell
+// 401 invalid_token. Caller is responsible for deduping concurrent calls.
+export async function forceRefreshToken(): Promise<SakrylleAuthToken | null> {
+  const token = getStoredToken()
+  if (!token) return null
+  return performRefresh(token)
 }
