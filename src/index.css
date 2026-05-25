@@ -683,11 +683,11 @@ html.dark [contenteditable] *::selection {
 }
 ::view-transition-new(root) {
   z-index: 2;
-  animation: theme-switch-clip 1.7s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+  animation: theme-switch-clip 2.5s cubic-bezier(0.19, 1, 0.22, 1) forwards;
 }
 html.theme-switch-reverse::view-transition-old(root) {
   z-index: 2;
-  animation: theme-switch-clip-reverse 1.7s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+  animation: theme-switch-clip-reverse 2.5s cubic-bezier(0.19, 1, 0.22, 1) forwards;
 }
 html.theme-switch-reverse::view-transition-new(root) {
   z-index: 1;
