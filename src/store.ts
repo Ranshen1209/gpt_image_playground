@@ -3263,6 +3263,7 @@ async function executeAgentRound(
 
         const batchResult = await callBatchImageSingle({
           profile: activeProfile,
+          allProfiles: requestSettings.profiles,
           params,
           batchItemId: item.id,
           prompt: item.prompt,

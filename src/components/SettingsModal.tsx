@@ -1323,6 +1323,29 @@ export default function SettingsModal() {
                 </div>
               )}
 
+              {/* 8.5. Agent 模式图像生成 Profile（仅 Responses API 显示） */}
+              {activeProfile.provider === 'openai' && activeProfile.apiMode === 'responses' && (
+                <label className="block">
+                  <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
+                    {t('settings.api.imageProfileId')}
+                  </span>
+                  <Select
+                    value={activeProfile.imageProfileId || ''}
+                    onChange={(value) => updateActiveProfile({ imageProfileId: value || undefined }, true)}
+                    options={[
+                      { label: t('settings.api.imageProfileIdNone'), value: '' },
+                      ...settings.profiles
+                        .filter(p => p.id !== activeProfile.id && p.provider === 'openai' && p.apiMode === 'images')
+                        .map(p => ({ label: p.name, value: p.id }))
+                    ]}
+                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+                  />
+                  <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
+                    {t('settings.api.imageProfileIdHint')}
+                  </div>
+                </label>
+              )}
+
               {/* 9. 返回 Base64 图片数据 */}
               {activeProviderIsOpenAICompatible && (
                 <div className="block">

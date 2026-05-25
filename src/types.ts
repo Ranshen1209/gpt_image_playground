@@ -21,6 +21,8 @@ export interface ApiProfile {
   responseFormatB64Json?: boolean
   streamImages?: boolean
   streamPartialImages?: number
+  /** Agent 模式图像生成使用的 profile ID（可选）。若指定，Agent 生成图像时切换到该 profile 调用 Images API */
+  imageProfileId?: string
 }
 
 export interface AppSettings {

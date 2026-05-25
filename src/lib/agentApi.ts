@@ -735,11 +735,141 @@ export interface BatchImageCallResult {
 }
 
 /**
- * Generate a single image using Responses API with prompt-rewrite guard.
- * This mirrors the gallery mode's callResponsesImageApiSingle pattern.
+ * Generate a single image via Images API (POST /v1/images/generations or /v1/images/edits).
+ * Used when profile.imageProfileId is specified in Agent mode.
+ */
+async function callBatchImageSingleViaImagesApi(opts: {
+  profile: ApiProfile
+  params: TaskParams
+  batchItemId: string
+  prompt: string
+  referenceImageDataUrls: string[]
+  signal?: AbortSignal
+  onImageToolStarted?: () => void | Promise<void>
+  onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
+}): Promise<BatchImageCallResult> {
+  const { profile, params, batchItemId, prompt, referenceImageDataUrls, signal, onImageToolStarted, onImageToolCompleted } = opts
+  const mime = MIME_MAP[params.output_format] || 'image/png'
+  const proxyConfig = readClientDevProxyConfig()
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
+  const abortFromCaller = () => controller.abort()
+  if (signal?.aborted) controller.abort()
+  signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  try {
+    await onImageToolStarted?.()
+
+    // Determine endpoint: edits if reference images, otherwise generations
+    const endpoint = referenceImageDataUrls.length > 0 ? 'images/edits' : 'images/generations'
+    const isEdit = endpoint === 'images/edits'
+
+    let body: FormData | string
+    if (isEdit) {
+      // Multipart form for edits
+      const formData = new FormData()
+      formData.append('prompt', prompt)
+      formData.append('model', profile.model)
+      formData.append('size', params.size)
+      formData.append('quality', params.quality)
+      formData.append('output_format', params.output_format)
+      formData.append('moderation', params.moderation)
+      formData.append('n', '1')
+      if (params.output_format !== 'png' && params.output_compression != null) {
+        formData.append('output_compression', String(params.output_compression))
+      }
+
+      // Add reference images
+      for (let i = 0; i < referenceImageDataUrls.length; i++) {
+        const dataUrl = referenceImageDataUrls[i]
+        const blob = await (await fetch(dataUrl)).blob()
+        formData.append(i === 0 ? 'image' : `image_${i}`, blob, `ref_${i}.png`)
+      }
+
+      body = formData
+    } else {
+      // JSON for generations
+      body = JSON.stringify({
+        model: profile.model,
+        prompt,
+        size: params.size,
+        quality: params.quality,
+        output_format: params.output_format,
+        moderation: params.moderation,
+        n: 1,
+        ...(params.output_format !== 'png' && params.output_compression != null ? { output_compression: params.output_compression } : {}),
+      })
+    }
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${profile.apiKey}`,
+    }
+    if (!isEdit) {
+      headers['Content-Type'] = 'application/json'
+    }
+
+    const response = await fetch(buildApiUrl(profile.baseUrl, endpoint, proxyConfig, useApiProxy), {
+      method: 'POST',
+      headers,
+      cache: 'no-store',
+      body,
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abortFromCaller)
+
+    if (!response.ok) {
+      const errorMsg = await getApiErrorMessage(response)
+      return { batchItemId, image: null, error: errorMsg }
+    }
+
+    const json = await response.json()
+    const dataArray = Array.isArray(json.data) ? json.data : []
+    if (dataArray.length === 0) {
+      return { batchItemId, image: null, error: 'No image returned from API' }
+    }
+
+    const firstImage = dataArray[0]
+    const b64 = firstImage.b64_json || firstImage.url
+    if (!b64) {
+      return { batchItemId, image: null, error: 'Image data missing in response' }
+    }
+
+    const dataUrl = normalizeBase64Image(b64, mime)
+    const resultImage: AgentApiResultImage = {
+      dataUrl,
+      revisedPrompt: firstImage.revised_prompt || prompt,
+      actualParams: pickActualParams(firstImage),
+    }
+
+    await onImageToolCompleted?.(resultImage)
+
+    return {
+      batchItemId,
+      image: resultImage,
+      error: null,
+      rawResponsePayload: JSON.stringify(json, null, 2),
+    }
+  } catch (err: unknown) {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abortFromCaller)
+
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { batchItemId, image: null, error: i18n.t('errors.requestCancelled') }
+    }
+    return { batchItemId, image: null, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Generate a single image using Responses API with prompt-rewrite guard,
+ * or switch to Images API if profile.imageProfileId is specified.
  */
 export async function callBatchImageSingle(opts: {
   profile: ApiProfile
+  allProfiles?: ApiProfile[]
   params: TaskParams
   batchItemId: string
   prompt: string
@@ -750,7 +880,26 @@ export async function callBatchImageSingle(opts: {
   onPartialImage?: (event: { image: string; partialImageIndex?: number }) => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<BatchImageCallResult> {
-  const { profile, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
+  const { profile, allProfiles, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
+
+  // If imageProfileId is specified, delegate to Images API
+  if (profile.imageProfileId && allProfiles) {
+    const imageProfile = allProfiles.find(p => p.id === profile.imageProfileId)
+    if (imageProfile) {
+      return callBatchImageSingleViaImagesApi({
+        profile: imageProfile,
+        params,
+        batchItemId,
+        prompt,
+        referenceImageDataUrls,
+        signal,
+        onImageToolStarted,
+        onImageToolCompleted,
+      })
+    }
+  }
+
+  // Otherwise use Responses API with image_generation tool
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
