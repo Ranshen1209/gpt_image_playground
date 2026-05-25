@@ -4054,18 +4054,23 @@ async function executeAgentRound(
                 referenceImageDataUrls: references.dataUrls,
                 taskParams,
                 signal: controller.signal,
-                onPartialImage: async ({ image, partialImageIndex }) => {
-                  if (controller.signal.aborted) return
-                  const taskId = taskIdByToolCallId.get(batchToolCallId)
-                  if (taskId) {
-                    useStore.getState().setTaskStreamPreview(taskId, image, partialImageIndex)
-                    if (partialImageIndex === 0 || partialImageIndex == null) void persistTaskStreamPartialImage(taskId, image)
-                  }
-                },
+                onPartialImage: shouldStreamAssistantMessage
+                  ? async ({ image, partialImageIndex }) => {
+                      if (controller.signal.aborted) return
+                      const taskId = taskIdByToolCallId.get(batchToolCallId)
+                      if (taskId) {
+                        useStore.getState().setTaskStreamPreview(taskId, image, partialImageIndex)
+                        if (partialImageIndex === 0 || partialImageIndex == null) {
+                          void persistTaskStreamPartialImage(taskId, image)
+                        }
+                      }
+                    }
+                  : undefined,
               })),
             }
           : await callBatchImageSingle({
               profile: imageProfile,
+              allProfiles: requestSettings.profiles,
               params: taskParams,
               batchItemId: item.id,
               prompt: item.prompt,
