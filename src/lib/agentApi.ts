@@ -76,9 +76,11 @@ const AGENT_TITLE_INSTRUCTIONS = [
 
 const AGENT_TITLE_MAX_LENGTH = 28
 
-function createHeaders(profile: ApiProfile): Record<string, string> {
+async function createHeaders(profile: ApiProfile): Promise<Record<string, string>> {
+  const { resolveBearerToken } = await import('./oauthFallback')
+  const token = await resolveBearerToken(profile)
   return {
-    Authorization: `Bearer ${profile.apiKey}`,
+    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   }
 }
@@ -638,7 +640,7 @@ export async function callAgentResponsesApi(opts: {
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
-      headers: createHeaders(profile),
+      headers: await createHeaders(profile),
       cache: 'no-store',
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -693,7 +695,7 @@ export async function callAgentConversationTitleApi(opts: {
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
-      headers: createHeaders(profile),
+      headers: await createHeaders(profile),
       cache: 'no-store',
       body: JSON.stringify({
         model: profile.model || settings.model,
@@ -965,7 +967,7 @@ export async function callBatchImageSingle(opts: {
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
-      headers: createHeaders(profile),
+      headers: await createHeaders(profile),
       cache: 'no-store',
       body: JSON.stringify(body),
       signal: controller.signal,
