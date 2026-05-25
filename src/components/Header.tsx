@@ -282,7 +282,7 @@ export default function Header() {
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
             {balance && (
-              <div className="glass-button hidden h-9 items-stretch gap-0 overflow-hidden rounded-full lg:inline-flex">
+              <div className="glass-button hidden h-9 items-stretch gap-0 overflow-hidden rounded-full sm:inline-flex">
                 <div
                   className="relative flex"
                   {...balanceTooltip.handlers}
@@ -290,7 +290,7 @@ export default function Header() {
                   <button
                     type="button"
                     onClick={() => setShowSettings(true)}
-                    className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0] bg-transparent hover:bg-white/20 dark:hover:bg-white/[0.06] transition-colors"
+                    className="inline-flex items-center gap-1.5 bg-transparent px-3 text-xs font-semibold text-[#5b4d8e] transition-colors hover:bg-white/20 dark:text-[#c4b8e0] dark:hover:bg-white/[0.06]"
                     aria-label={t('header.balanceAria', { amount: formatBalance(balance.creditRemaining, balance.currencyDisplay) })}
                   >
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-gradient-to-br from-[#b9a9da] to-[#7d6cb0]" />
@@ -310,7 +310,7 @@ export default function Header() {
                       dismissAllTooltips()
                       handleRecharge()
                     }}
-                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold bg-transparent hover:bg-white/20 dark:hover:bg-white/[0.06] transition-colors border-l border-white/40 dark:border-white/10 text-[#5b4d8e] dark:text-[#c4b8e0]"
+                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold text-white glass-button-primary border-0 rounded-none"
                     aria-label={t('header.rechargeAria')}
                   >
                     <CoinIcon className="w-3.5 h-3.5" />
@@ -329,7 +329,7 @@ export default function Header() {
                   dismissAllTooltips()
                   handleRecharge()
                 }}
-                className="hidden h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold glass-button text-[#5b4d8e] dark:text-[#c4b8e0] lg:inline-flex"
+                className="hidden sm:inline-flex h-9 items-center gap-1 px-3 rounded-full text-xs font-semibold glass-button-primary"
                 aria-label={t('header.rechargeAria')}
               >
                 <CoinIcon className="w-3.5 h-3.5" />
