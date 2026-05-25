@@ -1730,8 +1730,7 @@ export default function SettingsModal() {
                 </div>
               </div>
 
-              {/* 5. API Key — hidden when OAuth is active */}
-              {!(sakrylleLoggedIn && canUseOAuthForProfile(activeProfile)) && (
+              {/* 5. API Key */}
               <div className="block">
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">{t('settings.api.apiKeyManual')}</span>
                 <div className="relative">
@@ -1771,7 +1770,6 @@ export default function SettingsModal() {
                   }
                 </div>
               </div>
-              )}
 
               {/* 6. 分组选择器（OAuth 登录时显示） */}
               {activeProfile.provider === 'openai' && sakrylleLoggedIn && (

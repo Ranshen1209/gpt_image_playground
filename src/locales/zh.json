@@ -110,6 +110,7 @@
       "sakrylleLoginButton": "使用 Sakrylle 账户登录",
       "sakrylleHint": "登录后自动拉取余额、模型列表，无需手填 API Key。",
       "apiKeyManual": "API Key（手动）",
+      "apiKeyIgnoredWhenOAuth": "已使用 OAuth token，此字段将被忽略。若需使用手动 key，请创建新配置或注销 OAuth。",
       "apiKeyHintBefore": "支持通过查询参数覆盖：",
       "apiKeyHintAfter": "",
       "apiMode": "API 接口",
