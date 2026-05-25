@@ -1,8 +1,8 @@
 // OAuth Bearer fallback for image API requests.
 //
 // 当用户登录了 Sakrylle OAuth 但没配 API Key 时，自动用 access_token 调
-// /v1/images/*。仅适用于 Sakrylle 官方 baseUrl + Images API 模式 —— 其它服务商
-// (fal.ai、自定义 HTTP) 或 Responses API 路径仍然要求显式 apiKey。
+// /v1/images/* 和 /v1/responses。仅适用于 Sakrylle 官方 baseUrl —— 其它服务商
+// (fal.ai、自定义 HTTP) 仍然要求显式 apiKey。
 
 import type { ApiProfile } from '../types'
 import { getStoredToken, refreshIfNeeded } from './sakrylleAuth'
@@ -20,6 +20,8 @@ function isSakrylleBaseUrl(baseUrl: string): boolean {
 // under the OAuth token instead. False means the profile genuinely needs a key.
 export function canUseOAuthForProfile(profile: ApiProfile): boolean {
   if (profile.provider !== 'openai') return false
+  // OAuth token 只支持 Images API（绑定到 GPT-Image group）
+  // Responses API 需要 GPT-Pro/Plus group 的手动 key
   if (profile.apiMode !== 'images') return false
   if (!isSakrylleBaseUrl(profile.baseUrl)) return false
   return Boolean(getStoredToken())
