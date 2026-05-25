@@ -823,6 +823,13 @@ export default function InputBar() {
     }
   }, [maskDraft, maskTargetImage?.id, maskTargetImage?.dataUrl])
 
+  // 当 prompt 被外部清空时（如 submitAgentMessage），同步清空 contentEditable
+  useEffect(() => {
+    if (prompt === '' && !isUserInputRef.current && textareaRef.current && textareaRef.current.textContent !== '') {
+      textareaRef.current.innerHTML = ''
+    }
+  }, [prompt])
+
   const commitOutputCompression = useCallback(() => {
     if (outputCompressionInput.trim() === '') {
       setOutputCompressionInput('')
