@@ -1284,6 +1284,31 @@ export default function InputBar() {
     el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
 
     prevHeightRef.current = targetH
+
+    // 4. 确保光标可见（滚动到光标位置）
+    if (desired > maxH) {
+      window.requestAnimationFrame(() => {
+        const sel = window.getSelection()
+        if (!sel || sel.rangeCount === 0) return
+        try {
+          const range = sel.getRangeAt(0)
+          if (!el.contains(range.startContainer)) return
+          const rect = range.getBoundingClientRect()
+          const elRect = el.getBoundingClientRect()
+
+          // 光标在可视区域下方，向下滚动
+          if (rect.bottom > elRect.bottom - 10) {
+            el.scrollTop += rect.bottom - elRect.bottom + 20
+          }
+          // 光标在可视区域上方，向上滚动
+          if (rect.top < elRect.top + 10) {
+            el.scrollTop -= elRect.top - rect.top + 20
+          }
+        } catch {
+          // ignore
+        }
+      })
+    }
   }, [])
 
   // 将 prompt 同步渲染到 contentEditable（含胶囊 tag）
@@ -2137,7 +2162,7 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className="col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-[#b9a9da]/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-[#9181bd]/30"
+              className="col-start-1 row-start-1 min-h-[42px] max-h-[30vh] w-full ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-[#b9a9da]/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-[#9181bd]/30"
             />
             {prompt.length === 0 && (
               <div className="prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500">
