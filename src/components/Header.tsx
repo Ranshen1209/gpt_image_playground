@@ -289,14 +289,14 @@ export default function Header() {
                 </div>
               </div>
             )}
-            {!balance && getStoredToken() && (
+            {!balance && loggedIn && (
               <button
                 type="button"
                 onClick={() => {
                   dismissAllTooltips()
                   handleRecharge()
                 }}
-                className="hidden sm:inline-flex h-9 items-center gap-1 px-3 rounded-full text-xs font-semibold glass-button-primary"
+                className="hidden sm:inline-flex h-9 items-center gap-1 px-3 rounded-full text-xs font-semibold glass-button text-[#5b4d8e] dark:text-[#c4b8e0]"
                 aria-label={t('header.rechargeAria')}
               >
                 <CoinIcon className="w-3.5 h-3.5" />

@@ -171,6 +171,16 @@ export default function SettingsModal() {
     setSakrylleLoggedIn(Boolean(sakrylleGetStoredToken()))
   }, [showSettings])
 
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'sakrylle-image-playground.auth') {
+        setSakrylleLoggedIn(Boolean(sakrylleGetStoredToken()))
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
   const apiProxyLocked = isApiProxyLocked(apiProxyConfig)
