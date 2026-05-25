@@ -90,8 +90,19 @@ export default function Header() {
         if (!cancelled) setBalance(null)
         return
       }
-      const next = await fetchBalance()
-      if (!cancelled) setBalance(next)
+      try {
+        const next = await fetchBalance()
+        if (!cancelled) setBalance(next)
+      } catch (err: unknown) {
+        // fetchBalance throws 'oauth_logged_out' on 401 after authedFetch
+        // already called logout(). Clear UI state immediately.
+        if (err instanceof Error && err.message === 'oauth_logged_out') {
+          if (!cancelled) {
+            setLoggedIn(false)
+            setBalance(null)
+          }
+        }
+      }
     }
     const refreshIfVisible = () => {
       if (document.visibilityState === 'visible') void refresh()
