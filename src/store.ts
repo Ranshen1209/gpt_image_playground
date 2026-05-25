@@ -18,6 +18,7 @@ import type {
 } from './types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS, getActiveApiProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
+import { canUseOAuthForProfile } from './lib/oauthFallback'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
 import {
@@ -1981,8 +1982,9 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
     }
   }
 
-  if (validateApiProfile(activeProfile)) {
-    showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile) }), 'error')
+  const submitValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile(activeProfile) }
+  if (validateApiProfile(activeProfile, submitValidationOptions)) {
+    showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile, submitValidationOptions) }), 'error')
     useStore.getState().setShowSettings(true)
     return
   }

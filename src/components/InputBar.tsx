@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, updateTaskInStore, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds } from '../store'
 import { DEFAULT_PARAMS } from '../types'
 import { getActiveApiProfile, normalizeSettings } from '../lib/apiProfiles'
+import { canUseOAuthForProfile } from '../lib/oauthFallback'
 import { getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { normalizeImageSize } from '../lib/size'
@@ -591,7 +592,20 @@ export default function InputBar() {
       ? settings
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, currentActiveProfile.id, settings])
-  const hasSubmitApiConfig = Boolean(activeProfile.apiKey)
+  const [oauthSessionTick, setOauthSessionTick] = useState(0)
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'sakrylle-image-playground.auth') setOauthSessionTick((n) => n + 1)
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
+  const hasSubmitApiConfig = useMemo(
+    () => Boolean(activeProfile.apiKey) || canUseOAuthForProfile(activeProfile),
+    // oauthSessionTick re-evaluates canUseOAuthForProfile after login/logout in this tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeProfile, oauthSessionTick],
+  )
   const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning)
   const submitButtonAriaLabel = activeAgentIsRunning
     ? t('input.stopGenerating')

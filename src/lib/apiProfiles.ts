@@ -164,10 +164,18 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
   }
 }
 
-export function validateApiProfile(profile: ApiProfile): string | null {
+export interface ValidateApiProfileOptions {
+  // Pass true when the runtime caller can satisfy auth via OAuth instead of
+  // an explicit apiKey (Sakrylle Images mode + user is logged in). The check
+  // is opt-in because most call sites that validate profiles (settings save,
+  // import) want strict apiKey enforcement regardless of session state.
+  allowEmptyApiKey?: boolean
+}
+
+export function validateApiProfile(profile: ApiProfile, options: ValidateApiProfileOptions = {}): string | null {
   if (!profile.name.trim()) return i18n.t('errors.profile.missingName')
   if (!profile.baseUrl.trim()) return i18n.t('errors.profile.missingBaseUrl')
-  if (!profile.apiKey.trim()) return i18n.t('errors.profile.missingApiKey')
+  if (!profile.apiKey.trim() && !options.allowEmptyApiKey) return i18n.t('errors.profile.missingApiKey')
   if (!profile.model.trim()) return i18n.t('errors.profile.missingModel')
   return null
 }

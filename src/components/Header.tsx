@@ -238,15 +238,15 @@ export default function Header() {
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {balance && (
-              <div className="hidden sm:inline-flex items-center gap-0 rounded-full overflow-hidden ring-1 ring-white/50 shadow-[0_4px_14px_rgba(145,129,189,0.18)] dark:ring-white/10">
+              <div className="hidden sm:inline-flex h-9 items-stretch gap-0 rounded-full overflow-hidden ring-1 ring-white/50 shadow-[0_4px_14px_rgba(145,129,189,0.18)] dark:ring-white/10">
                 <div
-                  className="relative"
+                  className="relative flex"
                   {...balanceTooltip.handlers}
                 >
                   <button
                     type="button"
                     onClick={() => setShowSettings(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0] bg-white/65 dark:bg-white/[0.06] hover:bg-white/85 dark:hover:bg-white/[0.10] transition-colors backdrop-blur"
+                    className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0] bg-white/65 dark:bg-white/[0.06] hover:bg-white/85 dark:hover:bg-white/[0.10] transition-colors backdrop-blur"
                     aria-label={t('header.balanceAria', { amount: formatBalance(balance.creditRemaining, balance.currencyDisplay) })}
                   >
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-gradient-to-br from-[#b9a9da] to-[#7d6cb0]" />
@@ -257,7 +257,7 @@ export default function Header() {
                   </ViewportTooltip>
                 </div>
                 <div
-                  className="relative"
+                  className="relative flex"
                   {...rechargeTooltip.handlers}
                 >
                   <button
@@ -266,7 +266,7 @@ export default function Header() {
                       dismissAllTooltips()
                       handleRecharge()
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white glass-button-primary border-0 rounded-none"
+                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold text-white glass-button-primary border-0 rounded-none"
                     aria-label={t('header.rechargeAria')}
                   >
                     <CoinIcon className="w-3.5 h-3.5" />
@@ -285,7 +285,7 @@ export default function Header() {
                   dismissAllTooltips()
                   handleRecharge()
                 }}
-                className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold glass-button-primary"
+                className="hidden sm:inline-flex h-9 items-center gap-1 px-3 rounded-full text-xs font-semibold glass-button-primary"
                 aria-label={t('header.rechargeAria')}
               >
                 <CoinIcon className="w-3.5 h-3.5" />
