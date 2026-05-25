@@ -1429,6 +1429,31 @@ export default function InputBar() {
     el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
 
     prevHeightRef.current = targetH
+
+    // 4. 确保光标可见（滚动到光标位置）
+    if (desired > maxH) {
+      window.requestAnimationFrame(() => {
+        const sel = window.getSelection()
+        if (!sel || sel.rangeCount === 0) return
+        try {
+          const range = sel.getRangeAt(0)
+          if (!el.contains(range.startContainer)) return
+          const rect = range.getBoundingClientRect()
+          const elRect = el.getBoundingClientRect()
+
+          // 光标在可视区域下方，向下滚动
+          if (rect.bottom > elRect.bottom - 10) {
+            el.scrollTop += rect.bottom - elRect.bottom + 20
+          }
+          // 光标在可视区域上方，向上滚动
+          if (rect.top < elRect.top + 10) {
+            el.scrollTop -= elRect.top - rect.top + 20
+          }
+        } catch {
+          // ignore
+        }
+      })
+    }
   }, [])
 
   // 同步 prompt 至 contentEditable
