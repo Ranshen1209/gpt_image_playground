@@ -123,7 +123,15 @@ async function authedFetch(path: string, init?: RequestInit): Promise<Response |
 
 export async function fetchBalance(): Promise<SakrylleBalance | null> {
   const response = await authedFetch('account/balance')
-  if (!response || !response.ok) return null
+  if (!response) return null
+  if (!response.ok) {
+    // 401 invalid_token already triggered logout() in authedFetch.
+    // Throw a sentinel so Header can immediately clear UI state.
+    if (response.status === 401) {
+      throw new Error('oauth_logged_out')
+    }
+    return null
+  }
   try {
     const payload = await response.json() as BalancePayload
     return {

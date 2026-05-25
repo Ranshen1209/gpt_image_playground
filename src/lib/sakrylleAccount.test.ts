@@ -179,7 +179,7 @@ describe('fetchBalance', () => {
     expect(retryHeaders.get('Authorization')).toBe('Bearer sk_oauth_rotated')
   })
 
-  it('logs out when refresh fails after OAuth 401 (terminal path)', async () => {
+  it('logs out and throws when refresh fails after OAuth 401 (terminal path)', async () => {
     const logoutSpy = vi.mocked(sakrylleAuth.logout)
     vi.mocked(sakrylleAuth.forceRefreshToken).mockResolvedValue(null)
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -189,9 +189,7 @@ describe('fetchBalance', () => {
       ),
     )
 
-    const balance = await fetchBalance()
-
-    expect(balance).toBeNull()
+    await expect(fetchBalance()).rejects.toThrow('oauth_logged_out')
     expect(logoutSpy).toHaveBeenCalled()
   })
 })
