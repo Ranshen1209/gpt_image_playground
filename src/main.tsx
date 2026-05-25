@@ -10,6 +10,14 @@ import { handleCallback } from './lib/sakrylleAuth'
 
 installMobileViewportGuards()
 
+function mountApp() {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+}
+
 if (typeof window !== 'undefined' && window.location.pathname === '/oauth/callback') {
   const search = new URLSearchParams(window.location.search)
   handleCallback(search)
@@ -21,8 +29,11 @@ if (typeof window !== 'undefined' && window.location.pathname === '/oauth/callba
       console.error('OAuth callback failed:', message)
     })
     .finally(() => {
-      window.location.replace('/')
+      window.history.replaceState({}, '', '/')
+      mountApp()
     })
+} else {
+  mountApp()
 }
 
 if ('serviceWorker' in navigator) {
@@ -38,9 +49,3 @@ if ('serviceWorker' in navigator) {
     })
   }
 }
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
