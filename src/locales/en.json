@@ -110,6 +110,7 @@
       "sakrylleLoginButton": "Sign in with Sakrylle",
       "sakrylleHint": "Once signed in, balance and model list load automatically — no manual API key needed.",
       "apiKeyManual": "API Key (manual)",
+      "apiKeyIgnoredWhenOAuth": "OAuth token is active. This field will be ignored. To use manual key, create a new profile or logout.",
       "apiKeyHintBefore": "Override via query string: ",
       "apiKeyHintAfter": "",
       "apiMode": "API endpoint",

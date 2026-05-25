@@ -20,6 +20,7 @@ import {
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logout as sakrylleLogout } from '../lib/sakrylleAuth'
+import { canUseOAuthForProfile } from '../lib/oauthFallback'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -1228,7 +1229,10 @@ export default function SettingsModal() {
                   </button>
                 </div>
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  {t('settings.api.apiKeyHintBefore')}<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>{t('settings.api.apiKeyHintAfter')}
+                  {sakrylleLoggedIn && canUseOAuthForProfile(activeProfile)
+                    ? t('settings.api.apiKeyIgnoredWhenOAuth')
+                    : <>{t('settings.api.apiKeyHintBefore')}<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>{t('settings.api.apiKeyHintAfter')}</>
+                  }
                 </div>
               </div>
 
