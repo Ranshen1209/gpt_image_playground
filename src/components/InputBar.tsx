@@ -620,7 +620,6 @@ export default function InputBar() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const replaceFileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
-  const prevHeightRef = useRef(42)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
 
@@ -1396,42 +1395,21 @@ export default function InputBar() {
     const el = textareaRef.current
     if (!el) return
 
-    // 计算图片区域等固定高度
-    const imagesHeight = imagesRef.current?.offsetHeight ?? 0
-    const fixedOverhead = imagesHeight + 140
-
-    // 最大高度限制在页面 40% 减固定开销，不小于 80px
-    const maxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
-
-    // 1. 清零高度以获取真实文本高度
-    el.style.transition = 'none'
-    el.style.height = '0'
-    el.style.overflowY = 'hidden'
-    const scrollH = el.scrollHeight
+    // contentEditable 自动增高，只需判断是否超过最大高度以设置 overflow
+    const maxH = window.innerHeight * 0.3
+    const currentH = el.scrollHeight
 
     // 判断是否只有一行
     const placeholderEl = el.parentElement?.querySelector('.prompt-placeholder')
     const placeholderH = placeholderEl ? placeholderEl.scrollHeight : 0
     const minH = Math.max(42, placeholderH)
-    const desired = scrollH
-    const targetH = Math.min(desired, maxH)
+    setIsSingleLine(currentH <= minH)
 
-    // 判断是否为单行
-    setIsSingleLine(desired <= minH)
+    // 超过最大高度时启用滚动
+    el.style.overflowY = currentH > maxH ? 'auto' : 'hidden'
 
-    // 2. 回设旧高度并重绘以准备触发动画
-    el.style.height = prevHeightRef.current + 'px'
-    void el.offsetHeight
-
-    // 3. 恢复平滑过渡并设置新目标高度
-    el.style.transition = 'height 150ms ease, border-color 200ms, box-shadow 200ms'
-    el.style.height = targetH + 'px'
-    el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
-
-    prevHeightRef.current = targetH
-
-    // 4. 确保光标可见（滚动到光标位置）
-    if (desired > maxH) {
+    // 确保光标可见（滚动到光标位置）
+    if (currentH > maxH) {
       window.requestAnimationFrame(() => {
         const sel = window.getSelection()
         if (!sel || sel.rangeCount === 0) return
