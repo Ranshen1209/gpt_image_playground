@@ -277,7 +277,7 @@ export default function Header() {
                       dismissAllTooltips()
                       handleRecharge()
                     }}
-                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold text-white glass-button-primary border-0 rounded-none"
+                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold glass-button border-0 rounded-none text-[#5b4d8e] dark:text-[#c4b8e0]"
                     aria-label={t('header.rechargeAria')}
                   >
                     <CoinIcon className="w-3.5 h-3.5" />
