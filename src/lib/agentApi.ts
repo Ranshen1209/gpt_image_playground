@@ -865,7 +865,7 @@ async function callBatchImageSingleViaImagesApi(opts: {
 
 /**
  * Generate a single image using Responses API with prompt-rewrite guard,
- * or switch to Images API if profile.imageProfileId is specified.
+ * or switch to Images API if profile.imageProfileId is specified or auto-detected.
  */
 export async function callBatchImageSingle(opts: {
   profile: ApiProfile
@@ -882,21 +882,27 @@ export async function callBatchImageSingle(opts: {
 }): Promise<BatchImageCallResult> {
   const { profile, allProfiles, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
 
-  // If imageProfileId is specified, delegate to Images API
+  // Auto-detect: if current profile is responses mode, find first images profile
+  let imageProfile: ApiProfile | undefined
   if (profile.imageProfileId && allProfiles) {
-    const imageProfile = allProfiles.find(p => p.id === profile.imageProfileId)
-    if (imageProfile) {
-      return callBatchImageSingleViaImagesApi({
-        profile: imageProfile,
-        params,
-        batchItemId,
-        prompt,
-        referenceImageDataUrls,
-        signal,
-        onImageToolStarted,
-        onImageToolCompleted,
-      })
-    }
+    imageProfile = allProfiles.find(p => p.id === profile.imageProfileId)
+  } else if (profile.apiMode === 'responses' && allProfiles) {
+    // Auto-detect first images profile
+    imageProfile = allProfiles.find(p => p.provider === 'openai' && p.apiMode === 'images')
+  }
+
+  // If imageProfile found, delegate to Images API
+  if (imageProfile) {
+    return callBatchImageSingleViaImagesApi({
+      profile: imageProfile,
+      params,
+      batchItemId,
+      prompt,
+      referenceImageDataUrls,
+      signal,
+      onImageToolStarted,
+      onImageToolCompleted,
+    })
   }
 
   // Otherwise use Responses API with image_generation tool

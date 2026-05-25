@@ -1958,6 +1958,18 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
 
   const normalizedSettings = normalizeSettings(settings)
   let activeProfile = getActiveApiProfile(settings)
+
+  // 画廊模式强制使用 apiMode=images 的 profile
+  if (activeProfile.apiMode !== 'images') {
+    const imagesProfile = normalizedSettings.profiles.find(p => p.provider === 'openai' && p.apiMode === 'images')
+    if (!imagesProfile) {
+      showToast(i18n.t('errors.noImagesProfile'), 'error')
+      useStore.getState().setShowSettings(true)
+      return
+    }
+    activeProfile = imagesProfile
+  }
+
   let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
   if (normalizedSettings.reuseTaskApiProfileTemporarily && (reusedTaskApiProfileId || reusedTaskApiProfileMissing)) {
     const reusedProfile = getReusedTaskApiProfile(normalizedSettings, reusedTaskApiProfileId)

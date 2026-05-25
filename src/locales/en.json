@@ -549,6 +549,7 @@
     "inputImageMissing": "Input image no longer exists",
     "maskImageMissing": "Mask image no longer exists",
     "missingProfileForTask": "API profile used by this task is missing.",
+    "noImagesProfile": "Gallery mode requires an Images API profile. Please create a profile with apiMode=images in settings.",
     "imageNotImage": "Not a valid image",
     "manifestMissing": "manifest.json missing in ZIP",
     "imageInputTooLarge": "Image input payload too large: {{actual}}; max {{limit}}",
