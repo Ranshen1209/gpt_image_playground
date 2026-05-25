@@ -21,7 +21,7 @@ if (typeof window !== 'undefined' && window.location.pathname === '/oauth/callba
       console.error('OAuth callback failed:', message)
     })
     .finally(() => {
-      window.history.replaceState({}, '', '/')
+      window.location.replace('/')
     })
 }
 
