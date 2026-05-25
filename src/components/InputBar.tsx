@@ -505,7 +505,6 @@ export default function InputBar() {
   const textareaRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
-  const prevHeightRef = useRef(42)
 
   const [isDragging, setIsDragging] = useState(false)
   const [isSingleLine, setIsSingleLine] = useState(true)
@@ -1251,42 +1250,21 @@ export default function InputBar() {
     const el = textareaRef.current
     if (!el) return
 
-    // 计算图片区域和其他固定元素占用的高度
-    const imagesHeight = imagesRef.current?.offsetHeight ?? 0
-    const fixedOverhead = imagesHeight + 140
+    // contentEditable 自动增高，只需判断是否超过最大高度以设置 overflow
+    const maxH = window.innerHeight * 0.3
+    const currentH = el.scrollHeight
 
-    // textarea 最大高度 = 页面 40% 减去固定开销，至少保留 80px
-    const maxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
-
-    // 1. 关闭过渡动画，设高度为 0 以获取真实的文本内容高度
-    el.style.transition = 'none'
-    el.style.height = '0'
-    el.style.overflowY = 'hidden'
-    const scrollH = el.scrollHeight
-
+    // 判断是否只有一行
     const placeholderEl = el.parentElement?.querySelector('.prompt-placeholder')
     const placeholderH = placeholderEl ? placeholderEl.scrollHeight : 0
     const minH = Math.max(42, placeholderH)
+    setIsSingleLine(currentH <= minH)
 
-    const desired = Math.max(scrollH, minH)
-    const targetH = desired > maxH ? maxH : desired
+    // 超过最大高度时启用滚动
+    el.style.overflowY = currentH > maxH ? 'auto' : 'hidden'
 
-    // 判断是否只有一行
-    setIsSingleLine(desired <= minH)
-
-    // 2. 将高度设回上一次的实际高度，强制重绘，准备开始动画
-    el.style.height = prevHeightRef.current + 'px'
-    void el.offsetHeight
-
-    // 3. 恢复平滑过渡，并设置目标高度
-    el.style.transition = 'height 150ms ease, border-color 200ms, box-shadow 200ms'
-    el.style.height = targetH + 'px'
-    el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
-
-    prevHeightRef.current = targetH
-
-    // 4. 确保光标可见（滚动到光标位置）
-    if (desired > maxH) {
+    // 确保光标可见（滚动到光标位置）
+    if (currentH > maxH) {
       window.requestAnimationFrame(() => {
         const sel = window.getSelection()
         if (!sel || sel.rangeCount === 0) return
