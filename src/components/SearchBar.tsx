@@ -12,14 +12,15 @@ export default function SearchBar() {
   const setFilterFavorite = useStore((s) => s.setFilterFavorite)
 
   return (
-    <div data-no-drag-select className="mt-6 mb-4 flex gap-3">
+    <div data-no-drag-select className="mt-6 mb-5 px-1 sm:px-2">
+      <div className="glass-panel flex gap-3 rounded-3xl p-3 shadow-[0_8px_22px_rgba(145,129,189,0.12)] sm:p-4">
       <div className="flex gap-2 flex-shrink-0 z-20">
         <button
           onClick={() => setFilterFavorite(!filterFavorite)}
-          className={`p-2.5 rounded-xl border transition-all ${
+          className={`p-2.5 rounded-2xl border shadow-sm transition-all ${
             filterFavorite
               ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-500/10 text-yellow-500'
-              : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+              : 'border-white/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] text-gray-400 hover:bg-white dark:hover:bg-white/[0.08]'
           }`}
           title={filterFavorite ? t('search.favoriteHide') : t('search.favoriteShow')}
         >
@@ -37,7 +38,7 @@ export default function SearchBar() {
               { label: t('search.filterRunning'), value: 'running' },
               { label: t('search.filterError'), value: 'error' },
             ]}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-[#9181bd]/30 focus:border-[#9181bd] transition"
+            className="px-3 py-2.5 rounded-2xl border border-white/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] hover:bg-white dark:hover:bg-white/[0.08] text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-[#9181bd]/30 focus:border-[#9181bd] transition"
           />
         </div>
       </div>
@@ -60,8 +61,9 @@ export default function SearchBar() {
           onChange={(e) => setSearchQuery(e.target.value)}
           type="text"
           placeholder={t('search.placeholder')}
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#9181bd]/30 focus:border-[#9181bd] transition"
+          className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-white/60 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.04] text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-[#9181bd]/30 focus:border-[#9181bd] transition"
         />
+      </div>
       </div>
     </div>
   )

@@ -1975,7 +1975,7 @@ export default function InputBar() {
         />
       )}
 
-      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
+      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-5xl px-4 sm:px-6 transition-all duration-300">
         {selectedTaskIds.length > 0 && (
           <div className="flex justify-center mb-3">
             <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
@@ -2044,7 +2044,7 @@ export default function InputBar() {
             </div>
           </div>
         )}
-        <div ref={cardRef} className="glass-input-shell rounded-2xl sm:rounded-3xl p-3 sm:p-4">
+        <div ref={cardRef} className="glass-input-shell rounded-[1.75rem] p-4 shadow-[0_12px_32px_rgba(145,129,189,0.16)] sm:rounded-[2rem] sm:p-5">
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
@@ -2083,7 +2083,7 @@ export default function InputBar() {
           {/* 输入框 */}
           <div className="relative grid">
             {showAtImageMenu && (
-              <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
+              <div style={{ left: `${menuLeft}px` }} className="glass-panel absolute bottom-full z-50 mb-3 w-64 overflow-hidden rounded-2xl border border-white/60 p-1.5 shadow-[0_10px_24px_rgba(145,129,189,0.14)] ring-1 ring-white/50 dark:border-white/[0.08] dark:ring-white/10">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">{t('input.selectImageReference')}</div>
                 <div className="max-h-56 overflow-y-auto custom-scrollbar">
                   {atImageOptions.map((option, optionIndex) => (
@@ -2154,10 +2154,10 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className="col-start-1 row-start-1 min-h-[42px] max-h-[30vh] w-full ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-[#b9a9da]/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-[#9181bd]/30"
+              className="relative z-0 col-start-1 row-start-1 min-h-[42px] max-h-[30vh] w-full ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-300/70 bg-white/95 pl-4 pr-10 py-3 text-[15px] leading-relaxed text-gray-700 shadow-[0_0_0_1px_rgba(24,20,40,0.20),0_8px_18px_rgba(24,20,40,0.18)] outline-none transition-[border-color,box-shadow] duration-200 focus:border-[#b9a9da] focus:shadow-[0_0_0_1px_rgba(91,77,142,0.22),0_10px_22px_rgba(24,20,40,0.20)] dark:border-white/[0.14] dark:bg-white/[0.10] dark:text-gray-100"
             />
             {prompt.length === 0 && (
-              <div className="prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500">
+              <div className="prompt-placeholder pointer-events-none relative z-10 col-start-1 row-start-1 flex min-h-[42px] items-center pl-4 pr-10 py-2 text-[15px] font-medium leading-normal text-gray-600 dark:text-gray-300">
                 {promptPlaceholder}
               </div>
             )}
@@ -2280,7 +2280,7 @@ export default function InputBar() {
                         className="fixed inset-0 z-40"
                         onClick={() => setShowMobileUploadMenu(false)}
                       />
-                      <div className="absolute bottom-full left-0 mb-2 w-32 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                      <div className="glass-panel absolute bottom-full left-0 z-50 mb-3 w-32 overflow-hidden rounded-2xl border border-white/60 shadow-[0_10px_24px_rgba(145,129,189,0.14)] animate-in fade-in slide-in-from-bottom-2 duration-200 dark:border-white/[0.08]">
                         <button
                           className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
                           onClick={() => {

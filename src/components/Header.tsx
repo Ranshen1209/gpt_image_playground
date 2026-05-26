@@ -154,22 +154,22 @@ export default function Header() {
     <>
       <header
         data-no-drag-select
-        className={`safe-area-top fixed top-0 left-0 right-0 z-40 glass-panel border-b border-white/40 dark:border-white/[0.08] transition-transform duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? '-translate-y-full sm:translate-y-0' : 'translate-y-0'}`}
+        className={`safe-area-top fixed top-0 left-0 right-0 z-40 glass-panel border-b border-white/40 dark:border-white/[0.08] transition-transform duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? '-translate-y-full lg:translate-y-0' : 'translate-y-0'}`}
       >
-        <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative">
-          <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
+        <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between gap-2 relative">
+          <div className="flex min-w-0 flex-1 items-center gap-2 pr-1 xl:pr-2">
             <a
               href="https://github.com/Ranshen1209/gpt_image_playground"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 group"
+              className="group flex min-w-0 items-center gap-2"
               aria-label={t('header.appName')}
             >
               <span className="relative inline-flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 overflow-hidden rounded-full transition-transform group-hover:scale-105">
                 <img src="./favicon.png" alt="" className="h-full w-full object-contain select-none" draggable={false} />
               </span>
-              <h1 className="inline-flex items-start relative">
-                <span className="text-[17px] sm:text-lg font-medium tracking-tight text-gray-800 dark:text-gray-100 group-hover:text-[#7d6cb0] dark:group-hover:text-[#c4b8e0] transition-colors">
+              <h1 className="relative inline-flex min-w-0 items-start">
+                <span className="truncate whitespace-nowrap text-[17px] font-medium tracking-tight text-gray-800 transition-colors group-hover:text-[#7d6cb0] dark:text-gray-100 dark:group-hover:text-[#c4b8e0] sm:text-lg">
                   {t('header.appName')}
                 </span>
                 {hasUpdate && latestRelease && (
@@ -189,7 +189,7 @@ export default function Header() {
                 )}
               </h1>
             </a>
-            {appMode === 'agent' && <div className="hidden sm:flex items-center gap-1 relative ml-2">
+            {appMode === 'agent' && <div className="relative ml-1 hidden items-center gap-1 xl:flex">
               <button
                 ref={historyButtonRef}
                 type="button"
@@ -216,7 +216,7 @@ export default function Header() {
             </div>}
           </div>
           {appMode === 'agent' && activeConversation && (
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden sm:flex max-w-[30%]">
+            <div className="absolute left-1/2 top-1/2 hidden max-w-[24%] -translate-x-1/2 -translate-y-1/2 xl:flex">
               <button
                 type="button"
                 onClick={() => {
@@ -231,25 +231,25 @@ export default function Header() {
               </button>
             </div>
           )}
-          <div className="hidden sm:flex items-center gap-1 rounded-2xl glass-button p-1 mr-3">
+          <div className="mr-1 hidden shrink-0 items-center gap-1 rounded-2xl glass-button p-1 lg:flex xl:mr-3">
             <button
               type="button"
               onClick={() => setAppMode('gallery')}
-              className={`px-4 py-1.5 rounded-xl text-sm transition-all ${appMode === 'gallery' ? 'bg-white/85 dark:bg-white/15 text-[#5b4d8e] dark:text-white shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-3 py-1.5 rounded-xl text-sm transition-all xl:px-4 ${appMode === 'gallery' ? 'bg-white/85 dark:bg-white/15 text-[#5b4d8e] dark:text-white shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               {t('header.gallery')}
             </button>
             <button
               type="button"
               onClick={() => setAppMode('agent')}
-              className={`px-4 py-1.5 rounded-xl text-sm transition-all ${appMode === 'agent' ? 'bg-white/85 dark:bg-white/15 text-[#5b4d8e] dark:text-white shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              className={`px-3 py-1.5 rounded-xl text-sm transition-all xl:px-4 ${appMode === 'agent' ? 'bg-white/85 dark:bg-white/15 text-[#5b4d8e] dark:text-white shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
             >
               {t('header.agent')}
             </button>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
             {balance && (
-              <div className="hidden sm:inline-flex h-9 items-stretch gap-0 rounded-full overflow-hidden ring-1 ring-white/50 shadow-[0_4px_14px_rgba(145,129,189,0.18)] dark:ring-white/10">
+              <div className="hidden h-9 items-stretch gap-0 overflow-hidden rounded-full ring-1 ring-white/50 shadow-[0_4px_14px_rgba(145,129,189,0.18)] dark:ring-white/10 lg:inline-flex">
                 <div
                   className="relative flex"
                   {...balanceTooltip.handlers}
@@ -296,7 +296,7 @@ export default function Header() {
                   dismissAllTooltips()
                   handleRecharge()
                 }}
-                className="hidden sm:inline-flex h-9 items-center gap-1 px-3 rounded-full text-xs font-semibold glass-button text-[#5b4d8e] dark:text-[#c4b8e0]"
+                className="hidden h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold glass-button text-[#5b4d8e] dark:text-[#c4b8e0] lg:inline-flex"
                 aria-label={t('header.rechargeAria')}
               >
                 <CoinIcon className="w-3.5 h-3.5" />
@@ -311,7 +311,7 @@ export default function Header() {
                 <button
                   type="button"
                   onClick={handleLogin}
-                  className="hidden sm:inline-flex items-center gap-1 h-9 px-2.5 rounded-xl glass-button text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0]"
+                  className="hidden h-9 items-center gap-1 rounded-xl px-2.5 text-xs font-semibold glass-button text-[#5b4d8e] dark:text-[#c4b8e0] lg:inline-flex"
                   aria-label={t('header.loginAria')}
                 >
                   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -388,7 +388,7 @@ export default function Header() {
             </div>
           </div>
         </div>
-        <div className={`safe-area-x sm:hidden overflow-hidden transition-all duration-300 ease-in-out ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 opacity-0 pb-0' : 'max-h-24 opacity-100 pb-2'}`}>
+        <div className={`safe-area-x overflow-hidden transition-all duration-300 ease-in-out lg:hidden ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 opacity-0 pb-0' : 'max-h-24 opacity-100 pb-2'}`}>
           {balance && (
             <div className="mx-2 mb-2 flex items-stretch rounded-full overflow-hidden ring-1 ring-white/50 dark:ring-white/10">
               <button
@@ -446,18 +446,17 @@ export default function Header() {
       </header>
 
       {/* Hint for sliding down */}
-      <div className={`fixed top-0 left-0 right-0 z-30 flex justify-center pointer-events-none transition-all duration-300 ease-in-out sm:hidden ${appMode === 'agent' && hintVisible && !agentMobileHeaderVisible ? 'translate-y-[env(safe-area-inset-top,0px)] opacity-100' : '-translate-y-full opacity-0'}`}>
+      <div className={`fixed top-0 left-0 right-0 z-30 flex justify-center pointer-events-none transition-all duration-300 ease-in-out lg:hidden ${appMode === 'agent' && hintVisible && !agentMobileHeaderVisible ? 'translate-y-[env(safe-area-inset-top,0px)] opacity-100' : '-translate-y-full opacity-0'}`}>
         <div className="bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-b-xl shadow-lg">
           {t('header.pullToReveal')}
         </div>
       </div>
 
-      <div className={`safe-area-top invisible pointer-events-none transition-all duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? 'max-h-0 sm:max-h-[500px] opacity-0 sm:opacity-100 overflow-hidden sm:overflow-visible' : 'max-h-[500px] opacity-100'}`} aria-hidden="true">
+      <div className={`safe-area-top invisible pointer-events-none transition-all duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? 'max-h-0 lg:max-h-[500px] opacity-0 lg:opacity-100 overflow-hidden lg:overflow-visible' : 'max-h-[500px] opacity-100'}`} aria-hidden="true">
         <div className="safe-header-inner" />
-        <div className={`safe-area-x sm:hidden overflow-hidden transition-all duration-300 ease-in-out ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 pb-0' : 'max-h-24 pb-2'}`}>
-          <div className="p-1">
-            <div className="py-1.5 text-sm" aria-hidden="true">{/* layout spacer */}</div>
-          </div>
+        <div className={`safe-area-x overflow-hidden transition-all duration-300 ease-in-out lg:hidden ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 pb-0' : 'max-h-24 pb-2'}`}>
+          {(balance || !loggedIn) && <div className="mx-2 mb-2 h-[34px]" />}
+          <div className="mx-2 h-[72px]" />
         </div>
       </div>
     </>
