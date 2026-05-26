@@ -551,6 +551,7 @@
     "maskImageMissing": "Mask image no longer exists",
     "missingProfileForTask": "API profile used by this task is missing.",
     "noImagesProfile": "Gallery mode requires an Images API profile. Please create a profile with apiMode=images in settings.",
+    "agentMissingImagesProfile": "Sakrylle Agent image generation requires a separate Images API profile. Create a GPT-Image profile in settings, then select it in the current Responses profile's Agent mode image generation profile field.",
     "imageNotImage": "Not a valid image",
     "manifestMissing": "manifest.json missing in ZIP",
     "imageInputTooLarge": "Image input payload too large: {{actual}}; max {{limit}}",

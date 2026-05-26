@@ -551,6 +551,7 @@
     "maskImageMissing": "遮罩图片已不存在",
     "missingProfileForTask": "找不到此任务所使用的 API 配置。",
     "noImagesProfile": "画廊模式需要 Images API 配置。请在设置中创建一个 apiMode=images 的 profile。",
+    "agentMissingImagesProfile": "Sakrylle Agent 图像生成需要单独的 Images API profile。请在设置中创建 GPT-Image profile，并在当前 Responses profile 的「Agent 模式图像生成 Profile」中选择它。",
     "imageNotImage": "不是有效的图片",
     "manifestMissing": "ZIP 中缺少 manifest.json",
     "imageInputTooLarge": "图像输入有效负载总大小过大：{{actual}}，上限为 {{limit}}",

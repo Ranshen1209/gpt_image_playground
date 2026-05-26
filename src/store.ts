@@ -1926,11 +1926,11 @@ function isSakrylleApiBaseUrl(baseUrl: string): boolean {
 }
 
 function isImagesApiProfile(profile: ApiProfile | null | undefined): profile is ApiProfile {
-  return Boolean(profile && profile.apiMode === 'images')
+  return Boolean(profile && profile.provider === 'openai' && profile.apiMode === 'images')
 }
 
 function normalizeGalleryImageProfile(profile: ApiProfile): ApiProfile {
-  if (profile.model === DEFAULT_RESPONSES_MODEL) {
+  if (isSakrylleApiBaseUrl(profile.baseUrl) || profile.model === DEFAULT_RESPONSES_MODEL) {
     return { ...profile, model: DEFAULT_IMAGES_MODEL }
   }
   return profile
@@ -3340,7 +3340,6 @@ function getPendingImageGenerationCalls(output: ResponsesOutputItem[]) {
   return output.filter((item) => item.type === 'image_generation_call' && !imageGenerationCallHasResult(item))
 }
 
-
 function createAgentContinuationInputItem(newImageRefs: string[], toolCallsUsed: number, maxToolCalls: number) {
   const lines = [
     '[System] The app has saved your generated outputs and is continuing the same Agent turn.',
@@ -3907,6 +3906,20 @@ async function executeAgentRound(
       return { dataUrls, imageIds }
     }
 
+    const markAgentImageTaskError = (toolCallId: string | undefined, error: string) => {
+      if (!toolCallId) return
+      const taskId = taskIdByToolCallId.get(toolCallId)
+      if (!taskId) return
+      const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
+      if (latestTask?.status === 'done') return
+      updateTaskInStore(taskId, {
+        status: 'error',
+        error,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - (latestTask?.createdAt ?? startedAt),
+      })
+    }
+
     const parseSingleImageCallArguments = (args: string): { id: string; prompt: string } | null => {
       try {
         const parsed = JSON.parse(args) as Record<string, unknown>
@@ -4008,6 +4021,62 @@ async function executeAgentRound(
         failAgentImageTask(toolCallId, error)
         return JSON.stringify({ id: item.id, status: 'error', error })
       }
+    }
+
+    const executeImageGenerationCallWithGalleryApi = async (item: ResponsesOutputItem): Promise<BatchImageCallResult> => {
+      const toolCallId = getImageGenerationCallId(item)
+      const prompt = getImageGenerationCallPrompt(item, round?.prompt ?? userMessage.content)
+      const referenceIds = uniqueIds(extractAgentReferenceIds(prompt))
+      const references = await resolveReferenceImages(referenceIds)
+
+      await ensureStreamingAgentTask(toolCallId, prompt, references.imageIds, {
+        createdAt: Date.now(),
+        maskTargetImageId: null,
+        maskImageId: null,
+        apiProfile: appManagedImageProfile,
+      })
+
+      const result = await callBatchImageSingle({
+        profile: activeProfile,
+        allProfiles: requestSettings.profiles,
+        params,
+        batchItemId: toolCallId,
+        prompt,
+        referenceImageDataUrls: references.dataUrls,
+        referenceIds,
+        signal: controller.signal,
+        onImageToolStarted: shouldStreamAssistantMessage
+          ? async () => {
+              if (controller.signal.aborted) return
+            }
+          : undefined,
+        onPartialImage: shouldStreamAssistantMessage
+          ? async ({ image, partialImageIndex }) => {
+              if (controller.signal.aborted) return
+              const taskId = taskIdByToolCallId.get(toolCallId)
+              if (taskId) {
+                useStore.getState().setTaskStreamPreview(taskId, image, partialImageIndex)
+                if (partialImageIndex === 0 || partialImageIndex == null) {
+                  void persistTaskStreamPartialImage(taskId, image)
+                }
+              }
+            }
+          : undefined,
+        onImageToolCompleted: shouldStreamAssistantMessage
+          ? async (image) => {
+              if (controller.signal.aborted) return
+              await completeAgentImageTask({ ...image, toolCallId })
+            }
+          : undefined,
+      })
+
+      if (result.image && !shouldStreamAssistantMessage) {
+        await completeAgentImageTask({ ...result.image, toolCallId }, result.rawResponsePayload)
+      } else if (!result.image && result.error) {
+        markAgentImageTaskError(toolCallId, result.error)
+      }
+
+      return result
     }
 
     // Helper: execute a generate_image_batch function call concurrently
@@ -4123,9 +4192,7 @@ async function executeAgentRound(
         const batchToolCallId = batchExecutionItems[i]?.batchToolCallId
         if (settled.status === 'fulfilled') {
           const r = settled.value
-          if (!r.image) {
-            failAgentImageTask(batchExecutionItems[i].batchToolCallId, r.error!, r.rawResponsePayload)
-          }
+          if (!r.image && r.error) markAgentImageTaskError(batchToolCallId, r.error)
           outputImages.push({
             id: r.batchItemId,
             status: r.image ? 'done' : 'error',
@@ -4133,7 +4200,7 @@ async function executeAgentRound(
           })
         } else {
           const error = settled.reason instanceof Error ? settled.reason.message : String(settled.reason)
-          failAgentImageTask(batchExecutionItems[i].batchToolCallId, error)
+          markAgentImageTaskError(batchToolCallId, error)
           outputImages.push({
             id: batchItem.id,
             status: 'error',

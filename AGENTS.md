@@ -1,170 +1,234 @@
-# Agent Instructions for gpt-image-playground
+# AGENTS.md
 
-本文件定义 AI 编码助手在此仓库中应遵循的工作方式。
+Agent instructions for this repository. `CLAUDE.md` is the full operational
+runbook and remains the source of truth; keep this file aligned with it when
+project facts change.
 
-## 项目概况
+## Project Shape
 
-- React 19 + Vite + TypeScript 前端应用，使用 Zustand 状态管理、Tailwind CSS 样式。
-- 源码在 `src/`，构建产物由 Vite 生成，不要手动编辑 `dist/`。
-- 包管理器为 npm（有 `package-lock.json`），不要使用 yarn 或 pnpm。
+Sakrylle Image is a fork of `CookSleep/gpt_image_playground`, maintained on the
+`theme/sakrylle` branch as `Ranshen1209/sakrylle-image`.
 
-## 常用命令
+- Pure frontend SPA: React 19, TypeScript, Vite 6, Tailwind 3, Zustand 5,
+  i18next.
+- No backend in this repo. User data lives in browser IndexedDB/localStorage;
+  image calls go to API providers directly.
+- Production site: `https://image.sakrylle.com`.
+- Default Sakrylle API base must be `https://api.sakrylle.com/v1`.
+- Sakrylle OAuth lives at `https://sub.sakrylle.com`.
 
-| 操作 | 命令 |
-|------|------|
-| 安装依赖 | `npm install` |
-| 开发服务器 | `npm run dev` |
-| 构建 | `npm run build` |
-| 运行测试 | `npm test` |
-| 监听测试 | `npm run test:watch` |
+## Non-Negotiables
 
-- 测试使用 Vitest，已有多个 `*.test.ts` 文件。
-- 不要新增 lint/formatter 配置文件，除非明确要求。
+- Preserve the multi-provider architecture. Do not remove OpenAI-compatible,
+  fal.ai, custom HTTP, Responses API, or Agent paths just because Sakrylle is the
+  default.
+- The only Sakrylle image model is `gpt-image-2`
+  (`src/lib/apiProfiles.ts::DEFAULT_IMAGES_MODEL`).
+- Sakrylle GPT-Image group keys are group-scoped. `group_id=5` is the GPT-Image
+  group with image generation enabled.
+- Keep OAuth PKCE, OAuth Bearer fallback, multi-group selection, and OIDC feature
+  flag behavior intact unless the task is explicitly changing them.
+- Do not store translated runtime error/status strings in persistent data. Use
+  sentinels from `src/lib/agentSentinels.ts` so language switching keeps old
+  records correct.
+- Brand name `Sakrylle` is not translated. Technical words such as API, URL,
+  API Key, token, and OAuth stay in English.
+- Rebase or UI work must preserve the Sakrylle visual system: Monet purple
+  palette, Liquid Glass utilities, ambient body class, Sakrylle logo, and dark
+  first-paint FOUC guard.
 
-## 代码风格（强制）
+## API And Auth Facts
 
-### 简单优先
+- Images API:
+  - `POST /v1/images/generations`
+  - `POST /v1/images/edits`
+- Sakrylle default image path uses streaming `POST /v1/chat/completions` for
+  text/image/mask generation when `streamChatCompletionsImage` is enabled.
+- Responses API:
+  - `POST /v1/responses`
+  - Used for Agent multi-turn conversations and streaming image flows.
+- Platform API:
+  - `GET /v1/me`
+  - `GET /v1/account/balance`
+  - `GET /v1/models`
+- OAuth Bearer fallback is allowed only for official Sakrylle base URLs and only
+  when scopes allow the requested mode.
+- Canonical v2 scopes:
+  `profile:read account:read account:balance:read models:read images:create responses:create offline_access`.
+  OIDC adds `openid profile email`.
+- Current billing is per successful request, not token-based.
 
-写出能工作的**最简代码**。少抽象、少包装。有疑问就内联。
+## Environment Variables
 
-- 不要为单次使用的 1-5 行逻辑创建独立函数，直接内联。
-- 函数只有在**多处调用**且**逻辑非平凡**时才值得提取。
-- 不要引入项目中不存在的设计模式或架构层。
+Build-time Vite envs:
 
-### 完整实现
+- `VITE_DEFAULT_API_URL`
+- `VITE_SAKRYLLE_PLATFORM_API`
+- `VITE_SAKRYLLE_OAUTH_BASE`
+- `VITE_SAKRYLLE_OAUTH_CLIENT_ID`
+- `VITE_SAKRYLLE_OIDC_ENABLED`
 
-- 不要留 `// TODO: implement later`、`// ...` 或 stub 函数。
-- 如果不确定某个细节，给出完整的最佳猜测实现。错误但完整的代码优于正确但残缺的骨架。
+Docker runtime envs injected by `deploy/inject-api-url.sh`:
 
-### 跟随现有风格
+- `DEFAULT_API_URL`
+- `ENABLE_API_PROXY`
+- `LOCK_API_PROXY`
+- `OAUTH_BASE`
+- `OAUTH_CLIENT_ID`
+- `OIDC_ENABLED`
+- `API_PROXY_URL`
+- `HOST`
+- `PORT`
 
-这是最高优先级规则。修改文件时，遵循该文件及周围代码的已有风格。
+Production intentionally uses browser direct calls to
+`https://api.sakrylle.com/v1`; the nginx API proxy is disabled unless explicitly
+configured otherwise.
 
-### 格式
+## Key Files
 
-- **2 空格缩进**。
-- **单引号**（`'hello'`）。
-- **无分号**。
-- 箭头函数始终加括号：`(x) => x`。
-- 行宽不做硬性限制，但尽量保持可读。
+- `src/store.ts` - main Zustand store, task lifecycle, Agent lifecycle, image
+  cache subscriptions, import/export.
+- `src/lib/apiProfiles.ts` - provider profiles, defaults, validation.
+- `src/lib/openaiCompatibleImageApi.ts` - OpenAI-compatible image calls,
+  concurrent multi-image splitting, retry/refill behavior.
+- `src/lib/chatCompletionsImageApi.ts` - Sakrylle streaming image path.
+- `src/lib/sakrylleAuth.ts` - OAuth PKCE, refresh rotation, OIDC token handling.
+- `src/lib/groupSelection.ts` - OAuth multi-group selection and group token
+  lookup.
+- `src/lib/oauthFallback.ts` - OAuth Bearer fallback for image/Responses calls.
+- `src/lib/sakrylleAccount.ts` - platform API calls and authed fetch retry.
+- `src/lib/sakrylleOidcDiscovery.ts` - OIDC discovery and endpoint fallback.
+- `src/lib/i18n.ts`, `src/lib/language.ts`, `src/locales/*.json` - i18n.
+- `src/lib/agentSentinels.ts` - persisted status/error sentinel handling.
+- `src/lib/theme.ts` - light/dark theme and View Transition switching.
+- `src/index.css` - Sakrylle palette, Liquid Glass utilities, ambient
+  background.
+- `index.html` - title, body class, first-paint FOUC guard, metadata.
+- `deploy/Dockerfile`, `deploy/inject-api-url.sh` - Docker build/runtime config
+  injection.
 
-### TypeScript
+## i18n Rules
 
-- 使用 ESM import，`const` 优先，永远不用 `var`。
-- Target `ES2020`（见 `tsconfig.json`）。
-- 优先早返回，避免深层嵌套和 `else` 链。
-- 尽量避免 `any`；需要时保持局部化。
-- 利用类型推断，不写多余的类型注解。
-- 共享类型放 `src/types.ts`，局部类型放文件顶部。
+- Add new UI strings to both `src/locales/zh.json` and `src/locales/en.json`.
+- Keep key sets, placeholders, and non-empty strings in sync; tests enforce this.
+- Components should use `useTranslation()`.
+- Non-component libs can import `i18n` and call `i18n.t(...)`.
+- Persistent messages must use sentinels rather than translated strings.
+- Existing profile default names such as `新配置`, `默认`, and `（复制）` are
+  persisted data and need migration care before changing.
 
-### 命名
+## Theme And Branding Rules
 
-- **PascalCase**：组件、类型、接口。
-- **camelCase**：函数、变量、参数。
-- **UPPER_SNAKE_CASE**：模块级常量。
-- 文件名小写驼峰：`apiProfiles.ts`、`maskPreprocess.ts`。
-- 局部变量优先短名：`ctx`、`el`、`msg`、`idx`、`opts`、`err`。多词名仅在单词不够清晰时使用。
+- `index.html` must keep the dark-mode first-paint IIFE before blocking styles.
+- `body` must keep the `sakrylle-ambient` class.
+- New glass-like UI should reuse `.glass-panel`, `.glass-card`,
+  `.glass-input-shell`, `.glass-button`, and `.glass-button-primary` from
+  `src/index.css`.
+- Avoid reintroducing Tailwind `blue-*` styling in Sakrylle UI. Use the existing
+  Monet purple values/palette.
+- `src/components/icons.tsx::SakrylleLogo` is the canonical logo. Do not restore
+  the old `public/pwa-icon.svg` flow.
+- Header intentionally removed the install-app prompt and help modal entry.
 
-### 解构
+## Multi-Image Behavior
 
-避免无必要的解构。优先点号访问以保留上下文。
+For Sakrylle `gpt-image-2`, upstream ignores single-request `n>1`; the app must
+split multi-image requests into parallel `n:1` calls.
 
-```ts
-// 好
-profile.baseUrl
-opts.settings
+- `MAX_CONCURRENT_IMAGE_REQUESTS` is intentionally 6.
+- Retry/refill behavior should preserve partial success handling and avoid
+  unlimited extra paid requests.
+- A fully successful refill should not surface as partial failure; exhausted
+  refill budget should keep successful images and show partial failure.
 
-// 避免
-const { baseUrl } = profile
-const { settings } = opts
+## Tests And Commands
+
+Common commands:
+
+```bash
+npm install
+npm run dev
+npm run mock:api
+npm run test
+npm run test:watch
+npx vitest run src/lib/someFile.test.ts
+npm run build
+npm run preview
+npm run deploy:cf
 ```
 
-例外：React 组件 props、hooks 返回值、函数参数解构是可以的。
+Run focused tests for touched areas when possible. Important suites include:
 
-### 控制流
+- `src/lib/sakrylleAuth.test.ts`
+- `src/lib/sakrylleAccount.test.ts`
+- `src/lib/sakrylleOidcDiscovery.test.ts`
+- `src/lib/oauthFallback.test.ts`
+- `src/lib/groupSelection.test.ts`
+- `src/lib/sakrylleImageSize.test.ts`
+- `src/lib/agentSentinels.test.ts`
+- `src/lib/agentApi.test.ts`
+- `src/locales/locales.test.ts`
+- `src/lib/apiProfiles.test.ts`
+- `src/lib/api.test.ts`
+- `src/lib/urlSettings.test.ts`
+- `src/store.test.ts`
 
-```ts
-// 好：早返回
-function getPreset(name: string) {
-  if (!name) return defaultPreset
-  return presets.find((p) => p.name === name)
-}
+If changing default API literals, update matching test assertions.
 
-// 避免：多余的 else
-function getPreset(name: string) {
-  if (!name) return defaultPreset
-  else return presets.find((p) => p.name === name)
-}
+## Release And Deployment Notes
+
+- Bump both `package.json` version and `public/sw.js` cache name for releases.
+  Otherwise old Service Worker chunks may remain active.
+- Docker image is published to
+  `ghcr.io/ranshen1209/gpt_image_playground:latest`.
+- GitHub Actions Docker build is normally triggered manually with
+  `workflow_dispatch`; do not rely on tag push alone.
+- Rollback must use a recorded image digest. The `latest` tag moves.
+- OAuth redirect URIs are owned by sub2api. To add or change callback domains,
+  update `oauth_clients.redirect_uris` in sub2api, not this repo.
+
+## Upstream Sync
+
+Normal upstream flow:
+
+```bash
+git fetch upstream
+git checkout theme/sakrylle
+git rebase upstream/main
 ```
 
-### 变量
+Expected conflict hotspots:
 
-优先 `const`，用三元或早返回代替 `let` 重赋值。
+- `index.html`
+- `src/index.css`
+- `src/lib/apiProfiles.ts`
+- `src/components/Header.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/components/icons.tsx`
+- `src/main.tsx`
+- `src/App.tsx`
+- `tailwind.config.js`
+- `README.md`
+- `public/manifest.webmanifest`
+- `public/favicon.png`
+- `package.json`
+- `public/sw.js`
+- `deploy/Dockerfile`
+- `deploy/inject-api-url.sh`
+- `src/vite-env.d.ts`
+- `src/store.ts`
 
-```ts
-// 好
-const params = hasInputImages
-  ? { ...baseParams, image: inputImages }
-  : baseParams
+When upstream adds UI, check for `blue-*` Tailwind classes and convert them to
+the Sakrylle palette. `src/components/HelpModal.tsx` is intentionally deleted;
+keep it deleted unless the product decision changes.
 
-// 避免
-let params
-if (hasInputImages) params = { ...baseParams, image: inputImages }
-else params = baseParams
-```
+## OIDC Documentation Governance
 
-### 常量提取
+`oidc-docs/` is product-local documentation for Sakrylle Image only. Shared
+platform identity docs are canonical in `../sub2api/sakrylle-docs/`.
 
-不要为一次性使用的字面量定义命名常量。只有满足以下条件之一才提取：
-1. 多处使用，或
-2. 含义不一目了然，或
-3. 是需要调优的关键参数。
+When changing OAuth/OIDC client behavior, `VITE_SAKRYLLE_*` envs,
+`OIDC_ENABLED`, token storage, discovery, nonce/id_token handling, logout/revoke,
+group routing, or Image rollout status, update local `oidc-docs/` in the same
+change and update center docs if the shared platform contract changes.
 
-### 防御性代码
-
-本项目涉及外部 API 响应、URL 参数、IndexedDB 持久化数据——对这些**外部输入**保留必要的校验和兼容处理（`normalize*`、`ensure*` 等函数在本项目中是合理的）。
-
-但不要对已声明为非可选的内部类型加投机性空检查。
-
-## Import 顺序
-
-大致分组：
-1. React / React DOM
-2. 第三方包（zustand、fflate、react-markdown 等）
-3. 本地类型（`../types`、`./types`）
-4. 本地模块（`./lib/*`、`./hooks/*`、`./components/*`）
-
-## React 组件
-
-- 函数组件 + hooks，不使用 class 组件。
-- 组件文件放 `src/components/`，hooks 放 `src/hooks/`，工具函数放 `src/lib/`。
-- 复杂 UI 逻辑可以拆成独立组件或 hook，不必强行内联。
-- Tailwind 类名不强制排序，但同类属性（布局、间距、颜色、交互）尽量分组书写，保持可读。
-
-## 错误处理
-
-- 对网络请求和文件 I/O 使用 `try/catch`，用 `console.warn` 或 `console.error` 记录。
-- 不要对没有证据会失败的路径加投机性错误处理。
-
-## 注释与语言
-
-- 代码注释使用**中文**，与项目现有风格保持一致。
-- UI 文案默认中文。
-- 注释应简洁，说明"为什么"而非"做了什么"——除非逻辑复杂不易一眼看出。
-
-## 架构约束
-
-- 新增纯函数或工具逻辑时，放 `src/lib/` 而非 `src/store.ts`。store 文件已过大，应只包含 state 定义和 action 入口。
-- 避免在多处重复定义相同工具函数（如 `blobToDataUrl`），优先复用 `src/lib/` 中已有导出。
-- 新增较大功能时，优先拆成独立模块（lib 函数 + hook + 组件），而非全部塞进现有大文件。
-- 组件超过 800 行时，考虑按逻辑边界拆成子组件或自定义 hook。
-
-## 注意事项
-
-- `src/store.ts` 是核心状态文件（5000+ 行），修改时注意：
-  - 持久化逻辑和数据迁移（`persist` middleware + IndexedDB）。
-  - 模块顶部的 `normalize*` 函数用于从 IndexedDB/localStorage 恢复时清洗旧格式数据，修改需保持向后兼容。
-  - 新增 state 字段时，考虑是否需要持久化以及升级路径。
-- `src/lib/apiProfiles.ts` 包含多供应商配置，修改时注意向后兼容。
-- `src/lib/db.ts` 是 IndexedDB 封装层，修改 schema 时需升级 `DB_VERSION` 并处理 `onupgradeneeded`。
-- 修改完成后优先运行 `npm run build` 验证编译，再运行 `npm test` 验证测试。
