@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
-import { callAgentConversationTitleApi, callAgentResponsesApi } from './agentApi'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle } from './agentApi'
 
 describe('callAgentResponsesApi', () => {
   afterEach(() => {
@@ -26,6 +26,7 @@ describe('callAgentResponsesApi', () => {
     const textDeltas: string[] = []
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
       apiMode: 'responses',
       streamImages: true,
       streamPartialImages: 2,
@@ -63,6 +64,7 @@ describe('callAgentResponsesApi', () => {
     }))
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
       apiMode: 'responses',
     })
 
@@ -77,6 +79,64 @@ describe('callAgentResponsesApi', () => {
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body.tools[0].input_image_mask).toEqual({ image_url: 'data:image/png;base64,bWFzaw==' })
+  })
+
+  it('uses app-managed image generation for Sakrylle Agent requests', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{
+        type: 'message',
+        content: [{ type: 'output_text', text: '你好！' }],
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+    })
+
+    await callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile,
+      params: DEFAULT_PARAMS,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: '你好' }] }],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.stream).toBeUndefined()
+    expect(body.instructions).toContain('app executes the actual image request through its configured Images API profile')
+    expect(body.tools.some((tool: { type?: string }) => tool.type === 'image_generation')).toBe(false)
+    expect(body.tools.find((tool: { name?: string }) => tool.name === 'generate_image_batch')?.description).toContain('including a single image')
+  })
+
+  it('does not route app-managed Agent chat through the upstream image_generation tool on temporary service errors', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: { message: 'Service temporarily unavailable' },
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+    })
+
+    await expect(callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile,
+      params: DEFAULT_PARAMS,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: '你好' }] }],
+    })).rejects.toThrow()
+
+    const responseCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/responses'))
+    expect(responseCalls.length).toBeGreaterThan(0)
+    for (const [, init] of responseCalls) {
+      const body = JSON.parse(String((init as RequestInit).body))
+      expect(body.tools.some((tool: { type?: string }) => tool.type === 'image_generation')).toBe(false)
+      expect(body.tools.find((tool: { name?: string }) => tool.name === 'generate_image_batch')?.description).toContain('including a single image')
+    }
   })
 
   it('extracts image_generation results from base64 object fields', async () => {
@@ -128,6 +188,7 @@ describe('callAgentResponsesApi', () => {
     const abortController = new AbortController()
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
       apiMode: 'responses',
       streamImages: true,
     })
@@ -224,5 +285,120 @@ describe('callAgentResponsesApi', () => {
     expect(body.tools).toEqual(expect.arrayContaining([{ type: 'web_search' }]))
     expect(result.text).toBe('See [OpenAI docs](https://platform.openai.com/docs).')
     expect(result.outputItems?.[0]).toMatchObject({ type: 'web_search_call', status: 'completed' })
+  })
+})
+
+describe('callBatchImageSingle', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('routes Agent batch image calls through the selected Images API profile', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-images',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: 'gpt-image-2',
+    })
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-chat',
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+      model: 'gpt-5.5',
+      imageProfileId: imageProfile.id,
+    })
+
+    const result = await callBatchImageSingle({
+      profile: responsesProfile,
+      allProfiles: [responsesProfile, imageProfile],
+      params: DEFAULT_PARAMS,
+      batchItemId: 'item-1',
+      prompt: '画一只猫',
+      referenceImageDataUrls: [],
+    })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://api.sakrylle.com/v1/images/generations')
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer image-key' })
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      model: 'gpt-image-2',
+      prompt: '画一只猫',
+    })
+    expect(result.image?.dataUrl).toBe('data:image/png;base64,aW1hZ2U=')
+  })
+
+  it('uses gallery-compatible multipart fields for Agent Images API edits', async () => {
+    const realFetch = globalThis.fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.startsWith('data:')) return realFetch(input, init)
+      return new Response(JSON.stringify({
+        data: [{ b64_json: 'ZWRpdA==' }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-images',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: 'gpt-image-2',
+    })
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-chat',
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+      model: 'gpt-5.5',
+      imageProfileId: imageProfile.id,
+    })
+
+    const result = await callBatchImageSingle({
+      profile: responsesProfile,
+      allProfiles: [responsesProfile, imageProfile],
+      params: DEFAULT_PARAMS,
+      batchItemId: 'item-1',
+      prompt: '修复这张图片',
+      referenceImageDataUrls: ['data:image/png;base64,aW1hZ2U='],
+    })
+
+    const apiCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/images/edits'))
+    expect(apiCall).toBeTruthy()
+    const [url, init] = apiCall!
+    const body = (init as RequestInit).body as FormData
+    expect(String(url)).toBe('https://api.sakrylle.com/v1/images/edits')
+    expect(body.get('image')).toBeNull()
+    expect(body.getAll('image[]')).toHaveLength(1)
+    expect(body.get('prompt')).toBe('修复这张图片')
+    expect(result.image?.dataUrl).toBe('data:image/png;base64,ZWRpdA==')
+  })
+
+  it('returns a configuration error for Sakrylle image calls without an Images API profile', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-chat',
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+      model: 'gpt-5.5',
+    })
+
+    const result = await callBatchImageSingle({
+      profile: responsesProfile,
+      allProfiles: [responsesProfile],
+      params: DEFAULT_PARAMS,
+      batchItemId: 'item-1',
+      prompt: '画一只猫',
+      referenceImageDataUrls: [],
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.image).toBeNull()
+    expect(result.error).toContain('Images API profile')
   })
 })

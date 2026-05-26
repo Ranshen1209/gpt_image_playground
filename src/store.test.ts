@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { DEFAULT_PARAMS } from './types'
-import { createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
+import { createDefaultOpenAIProfile, DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 import { SENTINEL_OPENAI_INTERRUPTED } from './lib/agentSentinels'
@@ -79,11 +79,15 @@ vi.mock('./lib/api', () => ({
 vi.mock('./lib/agentApi', () => ({
   callAgentConversationTitleApi: vi.fn(async () => '标题'),
   callAgentResponsesApi: vi.fn(() => new Promise(() => {})),
-  callBatchImageSingle: vi.fn(async (opts: { batchItemId: string; prompt: string }) => ({
-    batchItemId: opts.batchItemId,
-    image: { dataUrl: 'data:image/png;base64,batch-output', revisedPrompt: opts.prompt },
-    error: null,
-  })),
+  callBatchImageSingle: vi.fn(async (opts: { batchItemId: string; prompt: string; onImageToolCompleted?: (image: { dataUrl: string; revisedPrompt: string }) => void | Promise<void> }) => {
+    const image = { dataUrl: 'data:image/png;base64,batch-output', revisedPrompt: opts.prompt }
+    await opts.onImageToolCompleted?.(image)
+    return {
+      batchItemId: opts.batchItemId,
+      image,
+      error: null,
+    }
+  }),
   parseBatchImageCallArguments: vi.fn((args: string) => {
     try {
       const parsed = JSON.parse(args) as { images?: Array<{ id?: string; prompt?: string }> }
@@ -150,6 +154,17 @@ function importFile(data: ExportData): File {
   return { arrayBuffer: async () => buffer } as File
 }
 
+async function waitForAgentRoundDone(roundId: string | null | undefined, conversationId = 'conversation-a', maxTicks = 40) {
+  if (!roundId) return null
+  for (let i = 0; i < maxTicks; i++) {
+    const current = useStore.getState().agentConversations.find((item) => item.id === conversationId)
+    const round = current?.rounds.find((item) => item.id === roundId)
+    if (round?.status === 'done' || round?.status === 'error') return round
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  return null
+}
+
 describe('mask draft lifecycle in store actions', () => {
   beforeEach(() => {
     useStore.setState({
@@ -208,6 +223,86 @@ describe('mask draft lifecycle in store actions', () => {
     const state = useStore.getState()
     expect(state.tasks).toHaveLength(1)
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
+  })
+
+  it('uses the linked Images API profile and clears gallery input after submit', async () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'GPT Image',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: DEFAULT_RESPONSES_MODEL,
+    })
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'agent-profile',
+      name: 'Agent',
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+      model: DEFAULT_RESPONSES_MODEL,
+      imageProfileId: imageProfile.id,
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        profiles: [responsesProfile, imageProfile],
+        activeProfileId: responsesProfile.id,
+      }),
+      prompt: 'draw',
+      inputImages: [imageA],
+      maskDraft: null,
+    })
+
+    await submitTask()
+
+    const state = useStore.getState()
+    expect(state.tasks[0]).toMatchObject({
+      apiProfileId: imageProfile.id,
+      apiProfileName: 'GPT Image',
+      apiMode: 'images',
+      apiModel: DEFAULT_IMAGES_MODEL,
+    })
+    expect(state.prompt).toBe('')
+    expect(state.inputImages).toEqual([])
+  })
+
+  it('does not let temporary reuse switch gallery generation back to a Responses profile', async () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'GPT Image',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'agent-profile',
+      name: 'Agent',
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+      model: DEFAULT_RESPONSES_MODEL,
+      imageProfileId: imageProfile.id,
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        reuseTaskApiProfileTemporarily: true,
+        profiles: [responsesProfile, imageProfile],
+        activeProfileId: responsesProfile.id,
+      }),
+      reusedTaskApiProfileId: responsesProfile.id,
+      reusedTaskApiProfileName: responsesProfile.name,
+      reusedTaskApiProfileMissing: false,
+      prompt: 'draw again',
+    })
+
+    await submitTask()
+
+    const state = useStore.getState()
+    expect(state.tasks[0]).toMatchObject({
+      apiProfileId: imageProfile.id,
+      apiMode: 'images',
+      apiModel: DEFAULT_IMAGES_MODEL,
+    })
+    expect(state.reusedTaskApiProfileId).toBeNull()
   })
 
   it('preserves selected image mentions when replacing a mask target with an equivalent image id', () => {
@@ -1048,14 +1143,14 @@ describe('agent context for removed outputs', () => {
     const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
     const serializedInput = JSON.stringify(input)
     expect(serializedInput).not.toContain('deleted-base64')
-    expect(serializedInput).toContain('live-base64')
+    expect(serializedInput).not.toContain('live-base64')
     expect(serializedInput).not.toContain('deleted-call')
     expect(serializedInput).not.toContain('live-call')
     expect(serializedInput).not.toContain('image_generation_call')
     expect(serializedInput).toContain('removed_ref')
     expect(serializedInput).toContain('round-1-image-1')
     expect(serializedInput).toContain('round-1-image-2')
-    expect(serializedInput).toContain('input_image')
+    expect(serializedInput).not.toContain('input_image')
   })
 
   it('restores stripped image_generation results from task payloads when building context', async () => {
@@ -1097,8 +1192,9 @@ describe('agent context for removed outputs', () => {
 
     const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
     const serializedInput = JSON.stringify(input)
-    expect(serializedInput).toContain('live-base64')
-    expect(serializedInput).toContain('input_image')
+    expect(serializedInput).not.toContain('live-base64')
+    expect(serializedInput).not.toContain('input_image')
+    expect(serializedInput).toContain('round-1-image-2')
     expect(serializedInput).not.toContain('deleted-base64')
     expect(serializedInput).not.toContain('live-call')
     expect(serializedInput).not.toContain('image_generation_call')
@@ -1135,7 +1231,9 @@ describe('agent context for removed outputs', () => {
 
     const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
     const serializedInput = JSON.stringify(input)
-    expect(serializedInput).toContain('hydrated-live-base64')
+    expect(serializedInput).not.toContain('hydrated-live-base64')
+    expect(serializedInput).toContain('round-1-image-1')
+    expect(serializedInput).not.toContain('input_image')
   })
 
   it('restores stripped image results even when legacy tasks lack tool call ids', async () => {
@@ -1176,8 +1274,9 @@ describe('agent context for removed outputs', () => {
 
     const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
     const serializedInput = JSON.stringify(input)
-    expect(serializedInput).toContain('legacy-live-base64')
-    expect(serializedInput).toContain('input_image')
+    expect(serializedInput).not.toContain('legacy-live-base64')
+    expect(serializedInput).not.toContain('input_image')
+    expect(serializedInput).toContain('round-1-image-1')
     expect(serializedInput).not.toContain('image_generation_call')
     expect(serializedInput.match(/已生成图片。/g)).toHaveLength(1)
   })
@@ -1235,9 +1334,11 @@ describe('agent context for removed outputs', () => {
 
     const input = vi.mocked(callAgentResponsesApi).mock.calls[0][0].input
     const serializedInput = JSON.stringify(input)
-    expect(serializedInput).toContain('batch-base64-1')
-    expect(serializedInput).toContain('batch-base64-2')
-    expect(serializedInput).toContain('input_image')
+    expect(serializedInput).not.toContain('batch-base64-1')
+    expect(serializedInput).not.toContain('batch-base64-2')
+    expect(serializedInput).not.toContain('input_image')
+    expect(serializedInput).toContain('round-1-image-1')
+    expect(serializedInput).toContain('round-1-image-2')
     expect(serializedInput).not.toContain('batch-call-1')
     expect(serializedInput).not.toContain('batch-call-2')
     expect(serializedInput).not.toContain('image_generation_call')
@@ -1456,18 +1557,11 @@ describe('agent batch reference resolution', () => {
         }],
         responseId: 'response-1',
       })
-      .mockResolvedValueOnce({
-        text: '完成',
-        images: [],
-        outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '完成' }] }],
-        responseId: 'response-2',
-      })
 
     await submitAgentMessage()
 
-    for (let i = 0; i < 5 && vi.mocked(callBatchImageSingle).mock.calls.length === 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    }
+    const submittedRoundId = useStore.getState().agentConversations.find((item) => item.id === 'conversation-a')?.activeRoundId
+    await waitForAgentRoundDone(submittedRoundId)
     expect(callBatchImageSingle).toHaveBeenCalled()
     const batchArgs = vi.mocked(callBatchImageSingle).mock.calls[0][0]
     expect(batchArgs.referenceImageDataUrls).toEqual([imageB.dataUrl])
@@ -1494,22 +1588,84 @@ describe('agent batch reference resolution', () => {
         }],
         responseId: 'response-1',
       })
-      .mockResolvedValueOnce({
-        text: '完成',
-        images: [],
-        outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '完成' }] }],
-        responseId: 'response-2',
-      })
 
     await submitAgentMessage()
 
-    for (let i = 0; i < 5 && vi.mocked(callBatchImageSingle).mock.calls.length === 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    }
+    const submittedRoundId = useStore.getState().agentConversations.find((item) => item.id === 'conversation-a')?.activeRoundId
+    await waitForAgentRoundDone(submittedRoundId)
     expect(callBatchImageSingle).toHaveBeenCalled()
     const batchArgs = vi.mocked(callBatchImageSingle).mock.calls[0][0]
     expect(batchArgs.referenceImageDataUrls).toEqual([imageA.dataUrl])
     expect(batchArgs.referenceIds).toEqual(['round-3-reference-1'])
+  })
+
+  it('executes pending image_generation calls through the linked gallery Images API profile', async () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'GPT Image',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+    const linkedResponsesProfile = createDefaultOpenAIProfile({
+      ...responsesProfile,
+      imageProfileId: imageProfile.id,
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        apiMode: 'responses',
+        model: DEFAULT_RESPONSES_MODEL,
+        profiles: [linkedResponsesProfile, imageProfile],
+        activeProfileId: linkedResponsesProfile.id,
+      }),
+      prompt: '画一只猫',
+      inputImages: [],
+    })
+    vi.mocked(callAgentResponsesApi)
+      .mockResolvedValueOnce({
+        text: '',
+        images: [],
+        outputItems: [{
+          type: 'image_generation_call',
+          id: 'image-call-1',
+          arguments: JSON.stringify({ prompt: '画一只水彩猫' }),
+        }],
+        responseId: 'response-1',
+      })
+
+    await submitAgentMessage()
+
+    const submittedRoundId = useStore.getState().agentConversations.find((item) => item.id === 'conversation-a')?.activeRoundId
+    await waitForAgentRoundDone(submittedRoundId)
+
+    expect(callBatchImageSingle).toHaveBeenCalled()
+    const batchArgs = vi.mocked(callBatchImageSingle).mock.calls[0][0]
+    expect(batchArgs.prompt).toBe('画一只水彩猫')
+    expect(batchArgs.profile.id).toBe(linkedResponsesProfile.id)
+    expect(batchArgs.allProfiles?.map((profile) => profile.id)).toEqual([linkedResponsesProfile.id, imageProfile.id])
+
+    const state = useStore.getState()
+    const generatedTask = state.tasks.find((item) => item.agentToolCallId === 'image-call-1')
+    expect(generatedTask).toMatchObject({
+      prompt: '画一只水彩猫',
+      apiProfileId: imageProfile.id,
+      apiProfileName: 'GPT Image',
+      apiMode: 'images',
+      apiModel: DEFAULT_IMAGES_MODEL,
+      status: 'done',
+    })
+    expect(generatedTask?.outputImages).toHaveLength(1)
+    expect(callAgentResponsesApi).toHaveBeenCalledTimes(1)
+
+    const conversation = state.agentConversations.find((item) => item.id === 'conversation-a')
+    const latestRound = conversation?.rounds.find((item) => item.id === conversation.activeRoundId)
+    expect(latestRound).toMatchObject({
+      responseId: 'response-1',
+      status: 'done',
+    })
+    expect(conversation?.messages.find((message) => message.id === latestRound?.assistantMessageId)?.content).toBe('图像已生成。')
   })
 })
 
@@ -1625,4 +1781,3 @@ describe('agent assistant regeneration', () => {
     })
   })
 })
-

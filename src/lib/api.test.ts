@@ -155,6 +155,46 @@ describe('callImageApi', () => {
     })
   })
 
+  it('does not request streaming for Sakrylle Images API edits with reference images', async () => {
+    const realFetch = globalThis.fetch
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.startsWith('data:')) return realFetch(input, init)
+      return new Response(JSON.stringify({
+        data: [{ b64_json: 'ZWRpdA==' }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        streamPartialImages: 3,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+          streamPartialImages: 3,
+        })),
+      },
+      prompt: '修复这张图片',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: ['data:image/png;base64,aW1hZ2U='],
+    } as any)
+
+    const apiCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/images/edits'))
+    expect(apiCall).toBeTruthy()
+    const body = (apiCall![1] as RequestInit).body as FormData
+    expect(body.getAll('image[]')).toHaveLength(1)
+    expect(body.get('stream')).toBeNull()
+    expect(body.get('partial_images')).toBeNull()
+    expect(result.images).toEqual(['data:image/png;base64,ZWRpdA=='])
+  })
+
   it('does not expect revised prompts on official Images API stream completed events', async () => {
     const streamBody = [
       'data: {"created_at":1779112721,"type":"image_generation.completed","b64_json":"ZmluYWw=","background":"opaque","output_format":"jpeg","quality":"medium","sequence_number":0,"size":"1448x1086","usage":{"total_tokens":1569}}',

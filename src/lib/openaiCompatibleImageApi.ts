@@ -25,6 +25,14 @@ const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prom
 const IMAGES_GENERATION_PATH = 'images/generations'
 const IMAGES_EDIT_PATH = 'images/edits'
 
+function isSakrylleApiBaseUrl(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === 'api.sakrylle.com'
+  } catch {
+    return baseUrl.toLowerCase().includes('api.sakrylle.com')
+  }
+}
+
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
 }
@@ -488,6 +496,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${originalPrompt}`
     : originalPrompt
   const isEdit = inputImageDataUrls.length > 0
+  const shouldStreamImages = profile.streamImages && !(isEdit && isSakrylleApiBaseUrl(profile.baseUrl))
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
@@ -520,7 +529,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       if (profile.responseFormatB64Json) {
         formData.append('response_format', 'b64_json')
       }
-      if (profile.streamImages) {
+      if (shouldStreamImages) {
         formData.append('stream', 'true')
         formData.append('partial_images', String(getStreamPartialImages(profile)))
       }
@@ -582,7 +591,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       if (profile.responseFormatB64Json) {
         body.response_format = 'b64_json'
       }
-      if (profile.streamImages) {
+      if (shouldStreamImages) {
         body.stream = true
         body.partial_images = getStreamPartialImages(profile)
       }
@@ -603,7 +612,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       throw new Error(await getApiErrorMessage(response))
     }
 
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (shouldStreamImages && isEventStreamResponse(response)) {
       return parseImagesApiStreamResponse(response, mime, opts.onPartialImage)
     }
 

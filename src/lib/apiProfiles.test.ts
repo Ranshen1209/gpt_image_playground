@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
+  DEFAULT_RESPONSES_MODEL,
   DEFAULT_SETTINGS,
   createDefaultOpenAIProfile,
   findEquivalentApiProfile,
+  getActiveApiProfile,
   mergeImportedSettings,
   normalizeSettings,
 } from './apiProfiles'
@@ -256,6 +258,27 @@ describe('default profile', () => {
     expect(DEFAULT_SETTINGS.agentScrollToBottomAfterSubmit).toBe(true)
     expect(normalizeSettings({}).agentScrollToBottomAfterSubmit).toBe(true)
     expect(normalizeSettings({ agentScrollToBottomAfterSubmit: false }).agentScrollToBottomAfterSubmit).toBe(false)
+  })
+
+  it('preserves the selected Agent image generation profile', () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'responses-profile',
+      apiMode: 'responses',
+      model: DEFAULT_RESPONSES_MODEL,
+      imageProfileId: imageProfile.id,
+    })
+    const settings = normalizeSettings({
+      profiles: [responsesProfile, imageProfile],
+      activeProfileId: responsesProfile.id,
+    })
+
+    expect(settings.profiles[0].imageProfileId).toBe(imageProfile.id)
+    expect(getActiveApiProfile(settings).imageProfileId).toBe(imageProfile.id)
   })
 
   it('falls back to Sakrylle API URL when no override is set', () => {

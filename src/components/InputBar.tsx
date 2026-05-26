@@ -614,11 +614,18 @@ export default function InputBar() {
   const submitTooltipText = activeAgentIsRunning ? t('input.stopGenerationTooltip') : t('input.configureApiTooltip')
   const promptPlaceholder = t('input.placeholder')
   const submitCurrentMode = useCallback(() => {
-    if (appMode === 'agent') {
-      void submitAgentMessage()
-    } else {
-      void submitTask()
-    }
+    const promise = appMode === 'agent' ? submitAgentMessage() : submitTask()
+    void Promise.resolve(promise).finally(() => {
+      // Force-clear the contentEditable DOM after submit. The store's setPrompt('')
+      // already fires, but the prompt-sync useEffect can race against the lingering
+      // isUserInputRef flag (set true by the last keystroke). Clearing here makes it
+      // deterministic: if the store cleared the prompt, the visible input clears too.
+      const el = textareaRef.current
+      if (el && el.innerHTML !== '' && useStore.getState().prompt === '') {
+        isUserInputRef.current = false
+        el.innerHTML = ''
+      }
+    })
   }, [appMode])
   const stopActiveAgentResponse = useCallback(() => {
     stopAgentResponse(activeAgentConversationId)

@@ -290,25 +290,32 @@ function getConversationSearchText(conversation: AgentConversation) {
   ].join('\n').toLocaleLowerCase()
 }
 
-function getRoundTasks(round: AgentRound | null, tasks: TaskRecord[]) {
+function getRoundTasks(round: AgentRound | null, tasks: TaskRecord[], taskById?: Map<string, TaskRecord>) {
   if (!round) return []
-  return round.outputTaskIds.map((taskId) => tasks.find((task) => task.id === taskId) ?? null)
+  return round.outputTaskIds.map((taskId) => taskById?.get(taskId) ?? tasks.find((task) => task.id === taskId) ?? null)
 }
 
-function getRoundTaskSlots(round: AgentRound | null, tasks: TaskRecord[]): AgentRoundTaskSlot[] {
+function getRoundTaskSlots(round: AgentRound | null, tasks: TaskRecord[], taskById?: Map<string, TaskRecord>): AgentRoundTaskSlot[] {
   if (!round) return []
   return round.outputTaskIds.map((taskId) => ({
     taskId,
-    task: tasks.find((task) => task.id === taskId) ?? null,
+    task: taskById?.get(taskId) ?? tasks.find((task) => task.id === taskId) ?? null,
   }))
 }
 
 const MOBILE_HEADER_PULL_THRESHOLD = 24
 const MOBILE_HEADER_PULL_MAX_OFFSET = 48
 const MOBILE_HEADER_EDGE_GUARD = 24
+const AGENT_SCROLL_RESTORE_MAX_FRAMES = 30
 
 function getPageScrollTop() {
   return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0
+}
+
+function getMaxPageScrollTop() {
+  const scrollingElement = document.scrollingElement ?? document.documentElement
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+  return Math.max(0, scrollingElement.scrollHeight - viewportHeight)
 }
 
 export default function AgentWorkspace() {
@@ -336,6 +343,7 @@ export default function AgentWorkspace() {
   const agentScrollToBottomAfterSubmit = useStore((s) => s.settings.agentScrollToBottomAfterSubmit)
   const agentEditingRoundId = useStore((s) => s.agentEditingRoundId)
   const agentEditingConversationId = useStore((s) => s.agentEditingConversationId)
+  const agentScrollPositions = useStore((s) => s.agentScrollPositions)
   const setAgentEditingConversationId = useStore((s) => s.setAgentEditingConversationId)
   const setAgentEditingRoundId = useStore((s) => s.setAgentEditingRoundId)
   const setActiveAgentRoundId = useStore((s) => s.setActiveAgentRoundId)
@@ -357,6 +365,8 @@ export default function AgentWorkspace() {
   const touchStartY = useRef(-1)
   const conversationLongPressTimer = useRef<number | null>(null)
   const autoScrollStateRef = useRef<{ conversationId: string | null; lastUserMessageSignature: string | null }>({ conversationId: null, lastUserMessageSignature: null })
+  const autoScrollFollowRoundIdRef = useRef<string | null>(null)
+  const agentEntryScrollKeyRef = useRef<string | null>(null)
   const errorCopyPointerDownRef = useRef<{ x: number; y: number } | null>(null)
 
   const updateIsScrolledToBottom = useCallback(() => {
@@ -370,10 +380,49 @@ export default function AgentWorkspace() {
     setIsScrolledToBottom(sentinel.getBoundingClientRect().top <= viewportHeight + 24)
   }, [appMode])
 
-  const scrollToAgentBottom = useCallback(() => {
+  const scrollToAgentBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const scrollingElement = document.scrollingElement ?? document.documentElement
-    window.scrollTo({ top: scrollingElement.scrollHeight, behavior: 'smooth' })
+    window.scrollTo({ top: scrollingElement.scrollHeight, behavior })
   }, [])
+
+  const scrollToAgentPosition = useCallback((top: number, behavior: ScrollBehavior = 'auto') => {
+    window.scrollTo({ top: Math.min(Math.max(0, top), getMaxPageScrollTop()), behavior })
+  }, [])
+
+  const requestScrollToAgentBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    let secondFrame: number | null = null
+    const firstFrame = window.requestAnimationFrame(() => {
+      scrollToAgentBottom(behavior)
+      secondFrame = window.requestAnimationFrame(() => scrollToAgentBottom(behavior))
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame != null) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [scrollToAgentBottom])
+
+  const requestScrollToAgentPosition = useCallback((top: number, behavior: ScrollBehavior = 'auto') => {
+    let frame: number | null = null
+    let attempts = 0
+    let cancelled = false
+
+    const restore = () => {
+      if (cancelled) return
+      scrollToAgentPosition(top, behavior)
+      attempts += 1
+      if (attempts >= AGENT_SCROLL_RESTORE_MAX_FRAMES) return
+
+      const targetTop = Math.min(Math.max(0, top), getMaxPageScrollTop())
+      if (Math.abs(getPageScrollTop() - targetTop) <= 2 && getMaxPageScrollTop() >= top) return
+      frame = window.requestAnimationFrame(restore)
+    }
+
+    frame = window.requestAnimationFrame(restore)
+    return () => {
+      cancelled = true
+      if (frame != null) window.cancelAnimationFrame(frame)
+    }
+  }, [scrollToAgentPosition])
 
   const handleTouchStart = (e: React.TouchEvent) => {
     const touchY = e.touches[0]?.clientY ?? -1
@@ -473,6 +522,7 @@ export default function AgentWorkspace() {
           setMobileTopBarVisible(false)
         } else if (currentScrollY < lastScrollY - 10) {
           setMobileTopBarVisible(true)
+          autoScrollFollowRoundIdRef.current = null
         }
 
         updateIsScrolledToBottom()
@@ -529,42 +579,98 @@ export default function AgentWorkspace() {
     [conversation],
   )
 
+  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
+
+  const roundById = useMemo(
+    () => new Map((conversation?.rounds ?? []).map((round) => [round.id, round])),
+    [conversation?.rounds],
+  )
+
+  const messageById = useMemo(
+    () => new Map((conversation?.messages ?? []).map((message) => [message.id, message])),
+    [conversation?.messages],
+  )
+
+  const assistantMessageByRoundId = useMemo(() => {
+    const map = new Map<string, AgentMessage>()
+    for (const message of conversation?.messages ?? []) {
+      if (message.role === 'assistant') map.set(message.roundId, message)
+    }
+    return map
+  }, [conversation?.messages])
+
   const activeMessages = useMemo(() => {
     if (!conversation) return []
     const messages: AgentMessage[] = []
     for (const round of activeRounds) {
-      const userMessage = conversation.messages.find((message) => message.id === round.userMessageId)
+      const userMessage = messageById.get(round.userMessageId)
       if (userMessage) messages.push(userMessage)
       const assistantMessage = round.assistantMessageId
-        ? conversation.messages.find((message) => message.id === round.assistantMessageId)
-        : conversation.messages.find((message) => message.roundId === round.id && message.role === 'assistant')
+        ? messageById.get(round.assistantMessageId)
+        : assistantMessageByRoundId.get(round.id)
       if (assistantMessage) messages.push(assistantMessage)
     }
     return messages
-  }, [activeRounds, conversation])
+  }, [activeRounds, assistantMessageByRoundId, conversation, messageById])
+
+  useEffect(() => {
+    if (appMode !== 'agent') {
+      agentEntryScrollKeyRef.current = null
+      return
+    }
+    if (!conversation || activeMessages.length === 0) return
+    const key = conversation.id
+    if (agentEntryScrollKeyRef.current === key) return
+    agentEntryScrollKeyRef.current = key
+    const savedScrollTop = agentScrollPositions[conversation.id]
+    if (savedScrollTop != null) return requestScrollToAgentPosition(savedScrollTop, 'auto')
+    return requestScrollToAgentBottom('auto')
+  }, [activeMessages.length, agentScrollPositions, appMode, conversation, requestScrollToAgentBottom, requestScrollToAgentPosition])
 
   useEffect(() => {
     const conversationId = conversation?.id ?? null
-    const lastMessage = activeMessages[activeMessages.length - 1] ?? null
-    const lastUserMessageSignature = lastMessage?.role === 'user'
-      ? `${lastMessage.id}:${lastMessage.createdAt}:${lastMessage.content}`
+    let lastUserMessage: AgentMessage | null = null
+    for (let i = activeMessages.length - 1; i >= 0; i--) {
+      if (activeMessages[i].role === 'user') {
+        lastUserMessage = activeMessages[i]
+        break
+      }
+    }
+    const lastUserMessageSignature = lastUserMessage
+      ? `${lastUserMessage.id}:${lastUserMessage.createdAt}:${lastUserMessage.content}`
       : null
     const previous = autoScrollStateRef.current
+    const conversationChanged = previous.conversationId !== conversationId
     const shouldScroll = appMode === 'agent' &&
       agentScrollToBottomAfterSubmit &&
-      previous.conversationId === conversationId &&
-      lastMessage?.role === 'user' &&
+      !conversationChanged &&
       lastUserMessageSignature != null &&
       previous.lastUserMessageSignature !== lastUserMessageSignature
 
     autoScrollStateRef.current = { conversationId, lastUserMessageSignature }
+    if (conversationChanged) autoScrollFollowRoundIdRef.current = null
     if (!shouldScroll) return
 
-    const frame = window.requestAnimationFrame(() => {
-      scrollToAgentBottom()
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [activeMessages, agentScrollToBottomAfterSubmit, appMode, conversation?.id, scrollToAgentBottom])
+    autoScrollFollowRoundIdRef.current = lastUserMessage?.roundId ?? null
+    return requestScrollToAgentBottom()
+  }, [activeMessages, agentScrollToBottomAfterSubmit, appMode, conversation?.id, requestScrollToAgentBottom])
+
+  useEffect(() => {
+    const followRoundId = autoScrollFollowRoundIdRef.current
+    if (appMode !== 'agent' || !agentScrollToBottomAfterSubmit || !followRoundId) return
+
+    const followRound = activeRounds.find((round) => round.id === followRoundId)
+    if (!followRound) {
+      autoScrollFollowRoundIdRef.current = null
+      return
+    }
+
+    const cancelScroll = requestScrollToAgentBottom(followRound.status === 'running' ? 'smooth' : 'auto')
+    if (followRound.status !== 'running') {
+      autoScrollFollowRoundIdRef.current = null
+    }
+    return cancelScroll
+  }, [activeMessages, activeRounds, agentScrollToBottomAfterSubmit, appMode, requestScrollToAgentBottom, tasks])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(updateIsScrolledToBottom)
@@ -989,14 +1095,14 @@ export default function AgentWorkspace() {
               }
 
               const renderedMessages = activeMessages.map((message) => {
-                const round = conversation.rounds.find((item) => item.id === message.roundId)
+                const round = roundById.get(message.roundId)
                 const isAssistant = message.role === 'assistant'
                 const isStreamingAssistant = isAssistant && round?.status === 'running'
                 const isEditing = !isAssistant && round?.id === agentEditingRoundId
                 const siblingRounds = !isAssistant && round ? getAgentSiblingRounds(conversation, round) : []
                 const siblingIndex = round ? siblingRounds.findIndex((item) => item.id === round.id) : -1
                 const hasBranches = siblingRounds.length > 1
-                const taskSlotsForRound = isAssistant ? getRoundTaskSlots(round ?? null, tasks) : []
+                const taskSlotsForRound = isAssistant ? getRoundTaskSlots(round ?? null, tasks, taskById) : []
                 const tasksForRound = taskSlotsForRound.map((slot) => slot.task).filter(Boolean) as TaskRecord[]
                 const favoriteTasksForRound = tasksForRound.filter((task) => (task.outputImages?.length ?? 0) > 0)
                 const hasRoundFavoriteTasks = favoriteTasksForRound.length > 0
@@ -1004,6 +1110,7 @@ export default function AgentWorkspace() {
                 const assistantBlocks = isAssistant ? getAgentAssistantBlocks(round ?? null, taskSlotsForRound, tasks, Boolean(message.content.trim())) : []
                 const inputImagesForRound = (round?.inputImageIds || []).map(id => ({ id, dataUrl: '' }))
                 const parts = getPromptMentionParts(message.content, inputImagesForRound)
+                const roundTasks = isAssistant ? getRoundTasks(round ?? null, tasks, taskById).filter(Boolean) : []
                 return (
                   <div key={message.id} className={`flex w-full mb-6 ${isAssistant ? 'justify-start' : 'justify-end'}`}>
                     <div
@@ -1172,7 +1279,7 @@ export default function AgentWorkspace() {
                             }}>
                               <FavoriteIcon className="w-4 h-4" filled={allRoundTasksFavorited} />
                             </AgentActionButton>
-                                                        <AgentActionButton tooltip={t('agent.downloadAll')} className={`p-1.5 rounded-md transition-colors ${getRoundTasks(round ?? null, tasks).filter(Boolean).length > 0 ? 'text-gray-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10' : 'text-gray-300 dark:text-gray-600 opacity-50 cursor-not-allowed'}`} disabled={getRoundTasks(round ?? null, tasks).filter(Boolean).length === 0} onClick={async () => {
+                                                        <AgentActionButton tooltip={t('agent.downloadAll')} className={`p-1.5 rounded-md transition-colors ${roundTasks.length > 0 ? 'text-gray-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10' : 'text-gray-300 dark:text-gray-600 opacity-50 cursor-not-allowed'}`} disabled={roundTasks.length === 0} onClick={async () => {
                                const imageIds = tasksForRound.flatMap(t => t.outputImages || []);
                                if (imageIds.length === 0) return;
                                try {
@@ -1259,7 +1366,7 @@ export default function AgentWorkspace() {
         </div>
 
         <button
-          onClick={scrollToAgentBottom}
+          onClick={() => scrollToAgentBottom()}
           className={`fixed bottom-[calc(var(--input-bar-clearance,12rem)+1.5rem)] left-1/2 -translate-x-1/2 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 backdrop-blur shadow-[0_2px_12px_rgba(0,0,0,0.1)] border border-gray-200/50 text-gray-500 transition-all duration-300 hover:bg-gray-50 hover:text-gray-800 dark:border-white/[0.08] dark:bg-gray-800/90 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 ${
             !isScrolledToBottom && activeMessages.length > 0 ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0 pointer-events-none'
           }`}

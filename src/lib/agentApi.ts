@@ -1,6 +1,7 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
+import { dataUrlToBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
-import { getApiErrorMessage, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import { assertImageInputPayloadSize, fetchImageUrlAsDataUrl, getApiErrorMessage, isHttpUrl, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
 import i18n from './i18n'
 
 export interface AgentApiMessage {
@@ -25,7 +26,7 @@ export interface AgentApiResult {
   rawResponsePayload?: string
 }
 
-const AGENT_IMAGE_INSTRUCTIONS = [
+const AGENT_IMAGE_INSTRUCTIONS_COMMON = [
   'You are an image-generation assistant in a multi-turn gallery app.',
   '',
   '## Progressive Batch Generation',
@@ -34,29 +35,58 @@ const AGENT_IMAGE_INSTRUCTIONS = [
   '  2. **Batch Remaining Tasks:** Once the base reference is available, list all remaining images to be generated. The app will generate them concurrently for you. In your descriptions, explicitly instruct to reference the base image to maintain consistency.',
   '  3. **Independent Images:** If the requested images are completely independent (e.g. "3 different cats"), generate them together in ONE response. Do NOT generate them one by one across multiple responses.',
   'As the turn continues, output a brief progress note before each tool call.',
-  'For single-image requests, generate directly without any listing.',
   '',
+].join('\n')
+
+const AGENT_HOSTED_IMAGE_TOOL_INSTRUCTIONS = [
   '## Generating images',
+  '- For single-image requests, generate directly without any listing.',
   '- One image_generation call per distinct image. Never collage.',
   '- Dependent images (a later image needs to reference an earlier one) → generate the prerequisite first, then call continue_generation. The next round will have the result available as `<ref id="..." />`.',
   '- Only generate when explicitly requested; otherwise reply with text.',
   '- Preserve the user\'s original intent faithfully. Never substitute requested subjects for copyright/trademark reasons.',
-  '',
+].join('\n')
+
+const AGENT_APP_MANAGED_IMAGE_TOOL_INSTRUCTIONS = [
+  '## Generating images',
+  '- The image_generation tool is available for planning, but this app executes the actual image request through its configured Images API profile.',
+  '- For single-image requests or prerequisite/base images, call image_generation directly.',
+  '- Use generate_image_batch when 2+ independent images can be generated concurrently. For a single image, prefer image_generation.',
+  '- Never create a collage unless the user explicitly asks for a collage.',
+  '- Dependent images (a later image needs to reference an earlier one) → call image_generation for the prerequisite first, then call continue_generation. The next round will have the result available as `<ref id="..." />`.',
+  '- Independent images should be generated together in one generate_image_batch call.',
+  '- Only generate when explicitly requested; otherwise reply with text.',
+  '- Preserve the user\'s original intent faithfully. Never substitute requested subjects for copyright/trademark reasons.',
+].join('\n')
+
+const AGENT_REFERENCE_INSTRUCTIONS = [
   '## Reference tags and generated images in context',
   'NEVER output `<ref>`, `<available_refs>`, `<removed_ref>`, or any XML reference tags in visible assistant text — the system injects them automatically and your raw output will be shown directly to the user.',
   '- Previously generated images are injected as user messages containing the actual image (input_image) followed by a `<ref id="round-N-image-M" prompt="..." />` tag identifying it.',
   '- Deleted images appear as `<removed_ref id="..." />` without an accompanying image — do not reference them.',
   '- In user messages: `<ref id="..." />` may also point to user-attached/cited images.',
   '- In generate_image_batch tool arguments, include matching `<ref id="..." />` tags inside each image prompt when the prompt refers to a reference image. Do not use separate bare reference ids.',
-  'Resolve user mentions ("the first image") to the matching id. Only use existing ids in image_generation prompts and generate_image_batch prompts.',
+  'Resolve user mentions ("the first image") to the matching id. Only use existing ids in image prompts.',
 ].join('\n')
 
-function createAgentInstructions(settings: AppSettings) {
+function createAgentInstructions(settings: AppSettings, useAppManagedImageGeneration: boolean, includeImageTool = true) {
   const maxToolRounds = Number.isFinite(settings.agentMaxToolRounds)
     ? Math.max(1, Math.trunc(settings.agentMaxToolRounds))
     : DEFAULT_AGENT_MAX_TOOL_ROUNDS
   return [
-    AGENT_IMAGE_INSTRUCTIONS,
+    AGENT_IMAGE_INSTRUCTIONS_COMMON,
+    useAppManagedImageGeneration && !includeImageTool
+      ? AGENT_APP_MANAGED_IMAGE_TOOL_INSTRUCTIONS.replace(
+          '- For single-image requests or prerequisite/base images, call image_generation directly.',
+          '- The image_generation tool is unavailable in this retry. Use generate_image_batch for every image request, including single images and prerequisite/base images.',
+        ).replace(
+          '- Use generate_image_batch when 2+ independent images can be generated concurrently. For a single image, prefer image_generation.',
+          '- For single images, provide exactly one item in generate_image_batch.',
+        )
+      : useAppManagedImageGeneration
+      ? AGENT_APP_MANAGED_IMAGE_TOOL_INSTRUCTIONS
+      : AGENT_HOSTED_IMAGE_TOOL_INSTRUCTIONS,
+    AGENT_REFERENCE_INSTRUCTIONS,
     '',
     '## Tool policy',
     `- Current maximum tool-use rounds for this Agent turn: ${maxToolRounds}.`,
@@ -83,6 +113,37 @@ async function createHeaders(profile: ApiProfile): Promise<Record<string, string
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   }
+}
+
+function isSakrylleApiBaseUrl(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === 'api.sakrylle.com'
+  } catch {
+    return baseUrl.toLowerCase().includes('api.sakrylle.com')
+  }
+}
+
+function findAgentImagesApiProfile(profile: ApiProfile, profiles: ApiProfile[] | undefined): ApiProfile | undefined {
+  if (!profiles?.length) return undefined
+  if (profile.imageProfileId) {
+    const selected = profiles.find((item) =>
+      item.id === profile.imageProfileId &&
+      item.provider === 'openai' &&
+      item.apiMode === 'images',
+    )
+    if (selected) return selected
+  }
+
+  if (profile.apiMode !== 'responses') return undefined
+  return profiles.find((item) =>
+    item.id !== profile.id &&
+    item.provider === 'openai' &&
+    item.apiMode === 'images',
+  )
+}
+
+function shouldUseAppManagedImageGeneration(profile: ApiProfile, profiles: ApiProfile[] | undefined): boolean {
+  return Boolean(findAgentImagesApiProfile(profile, profiles)) || isSakrylleApiBaseUrl(profile.baseUrl)
 }
 
 function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: string): Record<string, unknown> {
@@ -113,21 +174,34 @@ function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: 
   return tool
 }
 
-function createAgentTools(params: TaskParams, profile: ApiProfile, settings: AppSettings, maskDataUrl?: string): Array<Record<string, unknown>> {
-  const tools: Array<Record<string, unknown>> = [createImageTool(params, profile, maskDataUrl)]
-
-  // generate_image_batch: custom function tool for concurrent multi-image generation
-  tools.push({
+function createBatchImageTool(useAppManagedImageGeneration: boolean, includeImageTool = true): Record<string, unknown> {
+  return {
     type: 'function',
     name: 'generate_image_batch',
-    description: [
-      'Generate multiple images concurrently. Use this ONLY when:',
-      '1. There are 2+ remaining images whose prerequisites (base references) are ALL already generated.',
-      '2. These images are independent of each other (none references another image in this same batch).',
-      'For single images or prerequisite/base images, use the built-in image_generation tool instead.',
+    description: (
+      useAppManagedImageGeneration
+        ? includeImageTool
+          ? [
+            'Generate multiple images concurrently through the app-managed Images API pipeline. Use this ONLY when:',
+            '1. There are 2+ remaining images whose prerequisites (base references) are ALL already generated.',
+            '2. These images are independent of each other (none references another image in this same batch).',
+            'For single images or prerequisite/base images, use the image_generation tool instead.',
+          ]
+          : [
+              'Generate one or more images through the app-managed Images API pipeline.',
+              'Use this for every image request, including a single image.',
+              'For a single image, provide one item in the images array.',
+            ]
+        : [
+            'Generate multiple images concurrently. Use this ONLY when:',
+            '1. There are 2+ remaining images whose prerequisites (base references) are ALL already generated.',
+            '2. These images are independent of each other (none references another image in this same batch).',
+            'For single images or prerequisite/base images, use the built-in image_generation tool instead.',
+          ]
+    ).concat([
       'Each image prompt must be self-contained and include full visual style descriptions.',
       'If an image needs to match a previously generated image, include the corresponding XML tag (e.g. <ref id="round-1-image-1" />) inside that image prompt so the app can attach the reference image automatically.',
-    ].join(' '),
+    ]).join(' '),
     parameters: {
       type: 'object',
       properties: {
@@ -155,7 +229,18 @@ function createAgentTools(params: TaskParams, profile: ApiProfile, settings: App
       additionalProperties: false,
     },
     strict: true,
-  })
+  }
+}
+
+function createAgentTools(params: TaskParams, profile: ApiProfile, settings: AppSettings, maskDataUrl?: string, useAppManagedImageGeneration = false, includeImageTool = true): Array<Record<string, unknown>> {
+  const tools: Array<Record<string, unknown>> = []
+
+  if (includeImageTool) {
+    tools.push(createImageTool(params, profile, maskDataUrl))
+  }
+
+  // generate_image_batch: custom function tool for concurrent multi-image generation
+  tools.push(createBatchImageTool(useAppManagedImageGeneration, includeImageTool))
 
   // continue_generation: model calls this to request another round (e.g. after generating a prerequisite image)
   tools.push({
@@ -188,6 +273,11 @@ function createAgentTools(params: TaskParams, profile: ApiProfile, settings: App
 
 function isEventStreamResponse(response: Response): boolean {
   return response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream') ?? false
+}
+
+function shouldRetryAgentWithoutImageTool(status: number, message: string): boolean {
+  if (status === 503 || status === 502 || status === 504) return true
+  return /service temporarily unavailable|upstream service temporarily unavailable/i.test(message)
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
@@ -604,6 +694,63 @@ async function parseAgentStreamResponse(
   }
 }
 
+function isRetriableHttpStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504
+}
+
+async function sleepUnlessAborted(ms: number, ...signals: Array<AbortSignal | undefined>): Promise<void> {
+  if (getAbortedSignal(signals)) return
+  await new Promise<void>((resolve) => {
+    const cleanup = () => {
+      for (const signal of signals) signal?.removeEventListener('abort', onAbort)
+    }
+    const onAbort = () => {
+      clearTimeout(timer)
+      cleanup()
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, ms)
+    for (const signal of signals) signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+// Retries a fetch on transient upstream errors (502/503/504). buildInit is
+// called on every attempt so RequestInit (including AbortSignal-bound bodies)
+// stays fresh. We only retry before reading the response body — once a
+// streaming response starts emitting events, network errors are surfaced.
+async function fetchWithRetry(
+  url: string,
+  buildInit: () => Promise<RequestInit> | RequestInit,
+  options: { maxAttempts?: number; signals?: Array<AbortSignal | undefined> } = {},
+): Promise<Response> {
+  const maxAttempts = options.maxAttempts ?? 3
+  const signals = options.signals ?? []
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    throwIfAborted(...signals)
+    try {
+      const init = await buildInit()
+      const response = await fetch(url, init)
+      if (response.ok || !isRetriableHttpStatus(response.status) || attempt === maxAttempts) {
+        return response
+      }
+      try { await response.text() } catch { /* drain so the connection releases */ }
+    } catch (err) {
+      if (getAbortedSignal(signals)) throw err
+      lastError = err
+      if (attempt === maxAttempts) throw err
+    }
+    const delayMs = 600 * Math.pow(2.5, attempt - 1)
+    await sleepUnlessAborted(delayMs, ...signals)
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('fetch failed after retries')
+}
+
 export async function callAgentResponsesApi(opts: {
   settings: AppSettings
   profile: ApiProfile
@@ -621,6 +768,8 @@ export async function callAgentResponsesApi(opts: {
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const useAppManagedImageGeneration = shouldUseAppManagedImageGeneration(profile, settings.profiles)
+  const shouldStreamResponse = profile.streamImages === true && !useAppManagedImageGeneration
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
   const abortFromCaller = () => controller.abort()
@@ -628,29 +777,47 @@ export async function callAgentResponsesApi(opts: {
   signal?.addEventListener('abort', abortFromCaller, { once: true })
 
   try {
-    const body: Record<string, unknown> = {
-      model: profile.model || settings.model,
-      instructions: createAgentInstructions(settings),
-      input,
-      tools: createAgentTools(params, profile, settings, maskDataUrl),
-    }
-    if (profile.streamImages) {
-      body.stream = true
+    const createBody = (includeImageTool: boolean): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
+        model: profile.model || settings.model,
+        instructions: createAgentInstructions(settings, useAppManagedImageGeneration, includeImageTool),
+        input,
+        tools: createAgentTools(params, profile, settings, maskDataUrl, useAppManagedImageGeneration, includeImageTool),
+      }
+      if (shouldStreamResponse && includeImageTool) {
+        body.stream = true
+      }
+      return body
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
-      method: 'POST',
-      headers: await createHeaders(profile),
-      cache: 'no-store',
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
+    const requestResponses = (includeImageTool: boolean) => fetchWithRetry(
+        buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy),
+        async () => ({
+          method: 'POST',
+          headers: await createHeaders(profile),
+          cache: 'no-store',
+          body: JSON.stringify(createBody(includeImageTool)),
+          signal: controller.signal,
+        }),
+        { signals: [controller.signal, signal] },
+      )
+
+    const includeImageToolForFirstRequest = !useAppManagedImageGeneration
+    let response = await requestResponses(includeImageToolForFirstRequest)
+    if (!response.ok) {
+      const errorMessage = await getApiErrorMessage(response)
+      if (useAppManagedImageGeneration && shouldRetryAgentWithoutImageTool(response.status, errorMessage)) {
+        response = await requestResponses(false)
+      } else {
+        throw new Error(errorMessage)
+      }
+    }
 
     if (!response.ok) {
       throw new Error(await getApiErrorMessage(response))
     }
 
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (shouldStreamResponse && isEventStreamResponse(response)) {
       return parseAgentStreamResponse(response, mime, controller.signal, signal, onTextDelta, onOutputItems, onImageToolStarted, onImagePartialImage, onImageToolCompleted)
     }
 
@@ -693,18 +860,22 @@ export async function callAgentConversationTitleApi(opts: {
       content.push({ type: 'input_image', image_url: dataUrl })
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
-      method: 'POST',
-      headers: await createHeaders(profile),
-      cache: 'no-store',
-      body: JSON.stringify({
-        model: profile.model || settings.model,
-        instructions: AGENT_TITLE_INSTRUCTIONS,
-        input: [{ role: 'user', content }],
-        max_output_tokens: 32,
+    const response = await fetchWithRetry(
+      buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy),
+      async () => ({
+        method: 'POST',
+        headers: await createHeaders(profile),
+        cache: 'no-store',
+        body: JSON.stringify({
+          model: profile.model || settings.model,
+          instructions: AGENT_TITLE_INSTRUCTIONS,
+          input: [{ role: 'user', content }],
+          max_output_tokens: 32,
+        }),
+        signal: controller.signal,
       }),
-      signal: controller.signal,
-    })
+      { signals: [controller.signal, signal] },
+    )
 
     if (!response.ok) {
       throw new Error(await getApiErrorMessage(response))
@@ -781,12 +952,22 @@ async function callBatchImageSingleViaImagesApi(opts: {
       if (params.output_format !== 'png' && params.output_compression != null) {
         formData.append('output_compression', String(params.output_compression))
       }
+      if (profile.responseFormatB64Json) {
+        formData.append('response_format', 'b64_json')
+      }
 
       // Add reference images
+      const imageBlobs: Blob[] = []
       for (let i = 0; i < referenceImageDataUrls.length; i++) {
         const dataUrl = referenceImageDataUrls[i]
-        const blob = await (await fetch(dataUrl)).blob()
-        formData.append(i === 0 ? 'image' : `image_${i}`, blob, `ref_${i}.png`)
+        imageBlobs.push(await dataUrlToBlob(dataUrl))
+      }
+      assertImageInputPayloadSize(imageBlobs.reduce((sum, blob) => sum + blob.size, 0))
+
+      for (let i = 0; i < imageBlobs.length; i++) {
+        const blob = imageBlobs[i]
+        const ext = blob.type.split('/')[1] || 'png'
+        formData.append('image[]', blob, `ref_${i + 1}.${ext}`)
       }
 
       body = formData
@@ -804,20 +985,25 @@ async function callBatchImageSingleViaImagesApi(opts: {
       })
     }
 
+    const { resolveBearerToken } = await import('./oauthFallback')
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${profile.apiKey}`,
+      Authorization: `Bearer ${await resolveBearerToken(profile)}`,
     }
     if (!isEdit) {
       headers['Content-Type'] = 'application/json'
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, endpoint, proxyConfig, useApiProxy), {
-      method: 'POST',
-      headers,
-      cache: 'no-store',
-      body,
-      signal: controller.signal,
-    })
+    const response = await fetchWithRetry(
+      buildApiUrl(profile.baseUrl, endpoint, proxyConfig, useApiProxy),
+      async () => ({
+        method: 'POST',
+        headers,
+        cache: 'no-store',
+        body,
+        signal: controller.signal,
+      }),
+      { signals: [controller.signal, signal] },
+    )
 
     clearTimeout(timeoutId)
     signal?.removeEventListener('abort', abortFromCaller)
@@ -834,12 +1020,14 @@ async function callBatchImageSingleViaImagesApi(opts: {
     }
 
     const firstImage = dataArray[0]
-    const b64 = firstImage.b64_json || firstImage.url
-    if (!b64) {
+    const imageValue = firstImage.b64_json || firstImage.url
+    if (!imageValue) {
       return { batchItemId, image: null, error: 'Image data missing in response' }
     }
 
-    const dataUrl = normalizeBase64Image(b64, mime)
+    const dataUrl = isHttpUrl(imageValue)
+      ? await fetchImageUrlAsDataUrl(imageValue, mime, signal)
+      : normalizeBase64Image(imageValue, mime)
     const resultImage: AgentApiResultImage = {
       dataUrl,
       revisedPrompt: firstImage.revised_prompt || prompt,
@@ -885,13 +1073,7 @@ export async function callBatchImageSingle(opts: {
   const { profile, allProfiles, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
 
   // Auto-detect: if current profile is responses mode, find first images profile
-  let imageProfile: ApiProfile | undefined
-  if (profile.imageProfileId && allProfiles) {
-    imageProfile = allProfiles.find(p => p.id === profile.imageProfileId)
-  } else if (profile.apiMode === 'responses' && allProfiles) {
-    // Auto-detect first images profile
-    imageProfile = allProfiles.find(p => p.provider === 'openai' && p.apiMode === 'images')
-  }
+  const imageProfile = profile.apiMode === 'images' ? profile : findAgentImagesApiProfile(profile, allProfiles)
 
   // If imageProfile found, delegate to Images API
   if (imageProfile) {
@@ -905,6 +1087,10 @@ export async function callBatchImageSingle(opts: {
       onImageToolStarted,
       onImageToolCompleted,
     })
+  }
+
+  if (isSakrylleApiBaseUrl(profile.baseUrl)) {
+    return { batchItemId, image: null, error: i18n.t('errors.agentMissingImagesProfile') }
   }
 
   // Otherwise use Responses API with image_generation tool
@@ -965,13 +1151,17 @@ export async function callBatchImageSingle(opts: {
       body.stream = true
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
-      method: 'POST',
-      headers: await createHeaders(profile),
-      cache: 'no-store',
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
+    const response = await fetchWithRetry(
+      buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy),
+      async () => ({
+        method: 'POST',
+        headers: await createHeaders(profile),
+        cache: 'no-store',
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      }),
+      { signals: [controller.signal, signal] },
+    )
 
     if (!response.ok) {
       const errorMsg = await getApiErrorMessage(response)

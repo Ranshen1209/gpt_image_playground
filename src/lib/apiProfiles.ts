@@ -83,6 +83,9 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
     streamImages: typeof record.streamImages === 'boolean' ? record.streamImages : defaults.streamImages,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, defaults.streamPartialImages),
+    imageProfileId: typeof record.imageProfileId === 'string' && record.imageProfileId.trim()
+      ? record.imageProfileId.trim()
+      : defaults.imageProfileId,
   }
 }
 
@@ -161,6 +164,9 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
     streamImages: typeof record.streamImages === 'boolean' ? record.streamImages : profile.streamImages,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, profile.streamPartialImages),
+    imageProfileId: typeof record.imageProfileId === 'string' && record.imageProfileId.trim()
+      ? record.imageProfileId.trim()
+      : profile.imageProfileId,
   }
 }
 
@@ -192,7 +198,8 @@ function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
     profile.codexCli === false &&
     profile.apiProxy === DEFAULT_OPENAI_API_PROXY &&
     profile.streamImages === true &&
-    profile.streamPartialImages === DEFAULT_STREAM_PARTIAL_IMAGES
+    profile.streamPartialImages === DEFAULT_STREAM_PARTIAL_IMAGES &&
+    !profile.imageProfileId
 }
 
 function hasOnlyDefaultProfiles(settings: AppSettings): boolean {
