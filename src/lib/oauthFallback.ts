@@ -20,11 +20,21 @@ function isSakrylleBaseUrl(baseUrl: string): boolean {
 // under the OAuth token instead. False means the profile genuinely needs a key.
 export function canUseOAuthForProfile(profile: ApiProfile): boolean {
   if (profile.provider !== 'openai') return false
-  // OAuth token 只支持 Images API（绑定到 GPT-Image group）
-  // Responses API 需要 GPT-Pro/Plus group 的手动 key
-  if (profile.apiMode !== 'images') return false
   if (!isSakrylleBaseUrl(profile.baseUrl)) return false
-  return Boolean(getStoredToken())
+
+  const token = getStoredToken()
+  if (!token) return false
+
+  // 根据 OAuth token 的 scope 判断能否用于当前 apiMode
+  const scope = token.scope ?? ''
+  if (profile.apiMode === 'images') {
+    return scope.includes('images:create') || scope.includes('image_generation')
+  }
+  if (profile.apiMode === 'responses') {
+    return scope.includes('responses:create')
+  }
+
+  return false
 }
 
 // Returns the Bearer token string to use in Authorization header.
