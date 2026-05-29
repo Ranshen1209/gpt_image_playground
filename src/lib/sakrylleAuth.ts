@@ -121,6 +121,12 @@ export async function beginLogin(): Promise<void> {
 }
 
 export async function handleCallback(searchParams: URLSearchParams): Promise<SakrylleAuthToken> {
+  const oauthError = searchParams.get('error')
+  if (oauthError) {
+    const desc = searchParams.get('error_description') || oauthError
+    throw new Error(desc)
+  }
+
   const code = searchParams.get('code')
   const state = searchParams.get('state')
   const expectedState = sessionStorage.getItem(PKCE_STATE_KEY)

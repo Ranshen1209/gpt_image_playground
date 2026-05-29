@@ -22,11 +22,9 @@ if (typeof window !== 'undefined' && window.location.pathname === '/oauth/callba
   const search = new URLSearchParams(window.location.search)
   handleCallback(search)
     .catch((err: unknown) => {
-      // Log only the error message — full error objects from the OAuth path
-      // can carry server descriptions that include token fragments. Keep
-      // production logs free of sensitive material.
       const message = err instanceof Error ? err.message : 'Unknown error'
       console.error('OAuth callback failed:', message)
+      ;(window as any).__oauthCallbackError = message
     })
     .finally(() => {
       window.history.replaceState({}, '', '/')

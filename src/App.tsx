@@ -49,6 +49,14 @@ export default function App() {
   }, [setSettings])
 
   useEffect(() => {
+    const err = (window as any).__oauthCallbackError
+    if (err) {
+      delete (window as any).__oauthCallbackError
+      useStore.getState().showToast(String(err), 'error')
+    }
+  }, [])
+
+  useEffect(() => {
     applyThemeClass(readStoredTheme())
   }, [])
 
