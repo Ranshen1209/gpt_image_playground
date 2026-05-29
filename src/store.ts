@@ -19,7 +19,7 @@ import type {
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, getActiveApiProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { canUseOAuthForProfile } from './lib/oauthFallback'
-import { getSelectedGroups, getAvailableGroups } from './lib/groupSelection'
+import { getSelectedGroups, getAvailableGroups, setSelectedGroup } from './lib/groupSelection'
 import { getStoredToken } from './lib/sakrylleAuth'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
@@ -1125,19 +1125,9 @@ export const useStore = create<AppState>()(
           const availableGroups = getAvailableGroups(token, 'responses')
           const selectedGroups = getSelectedGroups()
 
-          // If multiple groups available and no selection made, prompt user to choose
+          // If multiple groups available and no selection made, auto-select the first one
           if (availableGroups.length > 1 && !selectedGroups.responses) {
-            state.setConfirmDialog({
-              title: i18n.t('agent.selectGroupTitle'),
-              message: i18n.t('agent.selectGroupMessage', { count: availableGroups.length }),
-              confirmText: i18n.t('agent.selectGroup'),
-              cancelText: i18n.t('common.cancel'),
-              action: () => {
-                // TODO: Open group selection modal
-                useStore.getState().setShowSettings(true, 'api')
-              },
-            })
-            return
+            setSelectedGroup('responses', availableGroups[0].groupId)
           }
 
           const galleryInputDraft = saveGalleryInputDraft(state)
