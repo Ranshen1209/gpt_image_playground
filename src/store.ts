@@ -2975,8 +2975,9 @@ export async function submitAgentMessage() {
     return
   }
 
-  if (validateApiProfile(activeProfile)) {
-    showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile) }), 'error')
+  const agentValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' }) }
+  if (validateApiProfile(activeProfile, agentValidationOptions)) {
+    showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile, agentValidationOptions) }), 'error')
     state.setShowSettings(true)
     return
   }
@@ -3125,8 +3126,9 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
     return
   }
 
-  if (validateApiProfile(activeProfile)) {
-    showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile) }), 'error')
+  const regenValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' }) }
+  if (validateApiProfile(activeProfile, regenValidationOptions)) {
+    showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile, regenValidationOptions) }), 'error')
     state.setShowSettings(true)
     return
   }
