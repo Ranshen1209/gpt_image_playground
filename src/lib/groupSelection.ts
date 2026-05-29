@@ -1,11 +1,8 @@
-import type { SakrylleAuthToken } from './sakrylleAuth'
+import type { SakrylleGroup } from './sakrylleAccount'
 
 const STORAGE_KEY = 'sakrylle-image-playground.selected-groups'
 
 export interface SelectedGroups {
-  /** Selected group ID for Images API */
-  images?: number
-  /** Selected group ID for Responses API */
   responses?: number
 }
 
@@ -21,7 +18,7 @@ export function getSelectedGroups(): SelectedGroups {
 
 export function setSelectedGroup(apiMode: 'images' | 'responses', groupId: number): void {
   const current = getSelectedGroups()
-  current[apiMode] = groupId
+  if (apiMode === 'responses') current.responses = groupId
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
   } catch {
@@ -37,33 +34,12 @@ export function clearSelectedGroups(): void {
   }
 }
 
-/** Get all available groups for a given apiMode from the OAuth token */
-export function getAvailableGroups(
-  token: SakrylleAuthToken | null,
-  apiMode: 'images' | 'responses'
-): Array<{ groupId: number; groupName: string; accessToken: string; scope: string }> {
-  if (!token) return []
-
-  const allTokens = [
-    {
-      accessToken: token.accessToken,
-      scope: token.scope ?? '',
-      group: token.group,
-    },
-    ...(token.additionalTokens ?? []),
-  ]
-
-  const scopeFilter =
-    apiMode === 'images'
-      ? (scope: string) => scope.includes('images:create') || scope.includes('image_generation')
-      : (scope: string) => scope.includes('responses:create')
-
-  return allTokens
-    .filter((t) => t.group && scopeFilter(t.scope ?? ''))
-    .map((t) => ({
-      groupId: t.group!.id,
-      groupName: t.group!.name,
-      accessToken: t.accessToken,
-      scope: t.scope ?? '',
-    }))
+/** Fetch allowed groups from /v1/me that support Responses API */
+export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
+  const { fetchMe } = await import('./sakrylleAccount')
+  const me = await fetchMe()
+  if (!me?.allowed_groups?.length) return []
+  return me.allowed_groups.filter((g) =>
+    g.capabilities?.includes('responses:create') ?? true
+  )
 }

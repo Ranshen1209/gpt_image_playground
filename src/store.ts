@@ -1232,6 +1232,7 @@ export const useStore = create<AppState>()(
         )
 
         if (!agentValidationError || supportsResponsesApi) {
+        if (!agentValidationError || supportsResponsesApi) {
           const galleryInputDraft = saveGalleryInputDraft(state)
           const savedAgentScrollTop = state.activeAgentConversationId
             ? state.agentScrollPositions[state.activeAgentConversationId]
@@ -1256,6 +1257,7 @@ export const useStore = create<AppState>()(
               return
             }
             if (groups.length < 1) return
+            const { refreshWithGroupId } = await import('./lib/sakrylleAuth')
             useStore.getState().setConfirmDialog({
               title: i18n.t('agent.selectGroupTitle'),
               message: i18n.t('agent.selectGroupMessage', { count: groups.length }),
@@ -1267,8 +1269,9 @@ export const useStore = create<AppState>()(
               buttons: groups.map((group) => ({
                 label: group.name,
                 tone: 'primary' as const,
-                action: () => {
+                action: async () => {
                   setSelectedGroup('responses', group.id)
+                  await refreshWithGroupId(group.id)
                 },
               })),
             })

@@ -28,6 +28,12 @@ export interface SakrylleModel {
   perRequestPriceUsd?: number
 }
 
+export interface SakrylleGroup {
+  id: number
+  name: string
+  capabilities?: string[]
+}
+
 /** v2 /v1/me response — fields are scope-cropped per docs §7. */
 export interface SakrylleMePayload {
   user_id?: number
@@ -41,7 +47,7 @@ export interface SakrylleMePayload {
   effective_capabilities: string[]
   current_group?: string
   current_group_id?: number
-  allowed_groups?: unknown[]
+  allowed_groups?: SakrylleGroup[]
   quota?: unknown
   capabilities?: unknown
 }
