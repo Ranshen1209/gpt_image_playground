@@ -2937,7 +2937,13 @@ export async function submitAgentMessage() {
   const normalizedSettings = normalizeSettings(settings)
   const activeProfile = getActiveApiProfile(normalizedSettings)
 
-  if (activeProfile.provider !== 'openai' || activeProfile.apiMode !== 'responses') {
+  // Check if profile supports Responses API (either via apiMode or OAuth token scope)
+  const supportsResponsesApi = activeProfile.provider === 'openai' && (
+    activeProfile.apiMode === 'responses' ||
+    canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' })
+  )
+
+  if (!supportsResponsesApi) {
     state.setAppMode('agent')
     return
   }
