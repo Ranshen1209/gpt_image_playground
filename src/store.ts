@@ -19,8 +19,8 @@ import type {
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, getActiveApiProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { canUseOAuthForProfile } from './lib/oauthFallback'
-import { getSelectedGroups, getAvailableGroups, setSelectedGroup } from './lib/groupSelection'
-import { getStoredToken } from './lib/sakrylleAuth'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups } from './lib/groupSelection'
+
 import { dismissAllTooltips } from './lib/tooltipDismiss'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
 import {
@@ -1120,31 +1120,6 @@ export const useStore = create<AppState>()(
         )
 
         if (supportsResponsesApi) {
-          // Check if user needs to select a Responses API group
-          const token = getStoredToken()
-          const availableGroups = getAvailableGroups(token, 'responses')
-          const selectedGroups = getSelectedGroups()
-
-          // If multiple groups available and no selection made, prompt user to choose
-          if (availableGroups.length > 1 && !selectedGroups.responses) {
-            state.setConfirmDialog({
-              title: i18n.t('agent.selectGroupTitle'),
-              message: i18n.t('agent.selectGroupMessage', { count: availableGroups.length }),
-              icon: 'info',
-              showCancel: true,
-              cancelText: i18n.t('common.cancel'),
-              buttons: availableGroups.slice(0, 4).map((group) => ({
-                label: group.groupName,
-                tone: 'primary' as const,
-                action: () => {
-                  setSelectedGroup('responses', group.groupId)
-                  useStore.getState().setAppMode('agent')
-                },
-              })),
-            })
-            return
-          }
-
           const galleryInputDraft = saveGalleryInputDraft(state)
           const savedAgentScrollTop = state.activeAgentConversationId
             ? state.agentScrollPositions[state.activeAgentConversationId]
@@ -1159,6 +1134,28 @@ export const useStore = create<AppState>()(
             ...restoreAgentInputDraftState(state.agentInputDrafts, state.activeAgentConversationId),
           }))
           if (savedAgentScrollTop != null) requestPageScrollRestore(savedAgentScrollTop)
+          void (async () => {
+            const selectedGroups = getSelectedGroups()
+            if (selectedGroups.responses) return
+            const groups = await fetchResponsesApiGroups()
+            if (groups.length <= 1) return
+            const { refreshWithGroupId } = await import('./lib/sakrylleAuth')
+            useStore.getState().setConfirmDialog({
+              title: i18n.t('agent.selectGroupTitle'),
+              message: i18n.t('agent.selectGroupMessage', { count: groups.length }),
+              icon: 'info',
+              showCancel: true,
+              cancelText: i18n.t('common.cancel'),
+              buttons: groups.slice(0, 4).map((group) => ({
+                label: group.name,
+                tone: 'primary' as const,
+                action: async () => {
+                  setSelectedGroup('responses', group.id)
+                  await refreshWithGroupId(group.id)
+                },
+              })),
+            })
+          })()
           return
         }
 

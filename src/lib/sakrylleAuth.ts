@@ -12,7 +12,8 @@ const CLIENT_ID = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_CLIENT_ID) 
 // v2 canonical scopes — ONE token grants access to both Images API and Responses API.
 // offline_access is required to receive a refresh token.
 // profile:read enables /v1/me user info endpoint.
-const SCOPE = 'profile:read account:balance:read models:read images:create responses:create offline_access'
+// account:read enables allowed_groups, current_group in /v1/me (needed for group selection).
+const SCOPE = 'profile:read account:read account:balance:read models:read images:create responses:create offline_access'
 
 const AUTH_STORAGE_KEY = 'sakrylle-image-playground.auth'
 const PKCE_VERIFIER_KEY = 'sakrylle-image-playground.pkce-verifier'
@@ -297,4 +298,41 @@ export async function forceRefreshToken(): Promise<SakrylleAuthToken | null> {
   const token = getStoredToken()
   if (!token) return null
   return performRefresh(token)
+}
+
+// Refresh token with a specific group_id to switch the token's bound group.
+// docs §5: group_id must be in allowed_groups_snapshot recorded at consent time.
+export async function refreshWithGroupId(groupId: number): Promise<SakrylleAuthToken | null> {
+  const token = getStoredToken()
+  if (!token?.refreshToken) return null
+
+  if (token.refreshTokenExpiresAt != null && Date.now() >= token.refreshTokenExpiresAt) {
+    logout()
+    return null
+  }
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: token.refreshToken,
+      client_id: CLIENT_ID,
+      group_id: String(groupId),
+    })
+    const response = await fetch(`${OAUTH_BASE}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    if (!response.ok) throw new Error(`refresh with group_id failed HTTP ${response.status}`)
+    const payload = await response.json() as OAuthTokenResponse
+    const next = tokenFromPayload(payload, {
+      requireRefresh: true,
+      previousScope: token.scope,
+      previousRefreshTokenExpiresAt: token.refreshTokenExpiresAt,
+    })
+    saveToken(next)
+    return next
+  } catch {
+    return null
+  }
 }

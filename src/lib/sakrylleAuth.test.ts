@@ -466,6 +466,6 @@ describe('beginLogin', () => {
     expect(params.get('code_challenge_method')).toBe('S256')
     expect(params.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]+$/)
     expect(params.get('state')).toBe(state)
-    expect(params.get('scope')).toBe('profile:read account:balance:read models:read images:create responses:create offline_access')
+    expect(params.get('scope')).toBe('profile:read account:read account:balance:read models:read images:create responses:create offline_access')
   })
 })

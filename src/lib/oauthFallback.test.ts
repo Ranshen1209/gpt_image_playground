@@ -122,20 +122,12 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(false)
     })
 
-    it('returns true when additionalTokens contains matching scope', () => {
+    it('returns true when primary token scope contains responses:create', () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
-        accessToken: 'sk_oauth_images',
+        accessToken: 'sk_oauth_responses',
         expiresAt: Date.now() + 3600000,
-        scope: 'images:create',
-        additionalTokens: [
-          {
-            accessToken: 'sk_oauth_responses',
-            expiresAt: Date.now() + 3600000,
-            scope: 'responses:create',
-            group: { id: 3, name: 'GPT-Pro' },
-          },
-        ],
+        scope: 'images:create responses:create',
       })
       expect(canUseOAuthForProfile(profile)).toBe(true)
     })
@@ -199,33 +191,17 @@ describe('oauthFallback', () => {
       await expect(resolveBearerToken(profile)).rejects.toThrow('missing_credentials')
     })
 
-    it('selects token from additionalTokens when primary does not match', async () => {
+    it('returns primary token when it has responses:create scope', async () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
-        accessToken: 'sk_oauth_images',
+        accessToken: 'sk_oauth_responses',
         expiresAt: Date.now() + 3600000,
-        scope: 'images:create',
-        additionalTokens: [
-          {
-            accessToken: 'sk_oauth_responses',
-            expiresAt: Date.now() + 3600000,
-            scope: 'responses:create',
-            group: { id: 3, name: 'GPT-Pro' },
-          },
-        ],
+        scope: 'images:create responses:create',
       })
       vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue({
-        accessToken: 'sk_oauth_images',
+        accessToken: 'sk_oauth_responses',
         expiresAt: Date.now() + 3600000,
-        scope: 'images:create',
-        additionalTokens: [
-          {
-            accessToken: 'sk_oauth_responses',
-            expiresAt: Date.now() + 3600000,
-            scope: 'responses:create',
-            group: { id: 3, name: 'GPT-Pro' },
-          },
-        ],
+        scope: 'images:create responses:create',
       })
       const token = await resolveBearerToken(profile)
       expect(token).toBe('sk_oauth_responses')
