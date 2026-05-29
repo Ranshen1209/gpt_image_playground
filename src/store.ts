@@ -3439,15 +3439,19 @@ export async function submitAgentMessage() {
   const { settings, prompt, inputImages, maskDraft, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
 
+  const activeProfile = getAgentTextApiProfile(normalizedSettings) ?? getActiveApiProfile(normalizedSettings)
+  const imageProfile = getAgentImageApiProfile(normalizedSettings) ?? activeProfile
   const agentValidationError = getAgentProfileValidationError(normalizedSettings)
-  if (agentValidationError) {
+  const supportsResponsesApi = activeProfile.provider === 'openai' && (
+    activeProfile.apiMode === 'responses' ||
+    canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' })
+  )
+
+  if (agentValidationError && !supportsResponsesApi) {
     showToast(`请先完善 Agent API 配置：${agentValidationError.message}`, 'error')
     state.setShowSettings(true, normalizedSettings.agentApiConfigMode === 'off' ? 'api' : 'agent')
     return
   }
-
-  const activeProfile = getAgentTextApiProfile(normalizedSettings)!
-  const imageProfile = getAgentImageApiProfile(normalizedSettings)!
 
   const trimmedPrompt = prompt.trim()
   if (!trimmedPrompt) {
