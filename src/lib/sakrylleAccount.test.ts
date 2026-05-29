@@ -22,7 +22,7 @@ vi.mock('./sakrylleAuth', () => {
   }
 })
 
-import { fetchBalance, formatBalance, formatCny } from './sakrylleAccount'
+import { fetchBalance, fetchMe, formatBalance, formatCny } from './sakrylleAccount'
 import * as sakrylleAuth from './sakrylleAuth'
 
 const authMock = sakrylleAuth as typeof sakrylleAuth & {
@@ -30,13 +30,17 @@ const authMock = sakrylleAuth as typeof sakrylleAuth & {
   __getToken: () => { accessToken: string; refreshToken: string; expiresAt: number; scope?: string } | null
 }
 
-function seedToken(accessToken = 'sk_oauth_test_access'): void {
+function seedToken(accessToken = 'sk_oauth_test_access', scope = 'image_generation balance:read models:read'): void {
   authMock.__setToken({
     accessToken,
     refreshToken: 'rt_test_refresh',
     expiresAt: Date.now() + 60 * 60 * 1000,
-    scope: 'image_generation balance:read models:read',
+    scope,
   })
+}
+
+function seedV2Token(accessToken = 'sk_oauth_test_access'): void {
+  seedToken(accessToken, 'profile:read account:balance:read models:read images:create responses:create offline_access')
 }
 
 describe('formatBalance', () => {
@@ -59,9 +63,9 @@ describe('formatBalance', () => {
   })
 })
 
-describe('fetchBalance', () => {
+describe('fetchMe', () => {
   beforeEach(() => {
-    seedToken()
+    seedV2Token()
   })
 
   afterEach(() => {
@@ -69,98 +73,83 @@ describe('fetchBalance', () => {
     authMock.__setToken(null)
   })
 
-  it('parses the docs §3.1 schema into the SakrylleBalance shape', async () => {
+  it('calls GET /v1/me and returns the parsed payload', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
-          user_id: 123,
+          user_id: 42,
           username: 'alice',
-          credit_remaining: 12.34,
+          display_name: 'Alice',
+          balance: 9.99,
           currency_display: 'CNY',
-          rate_multiplier: 1.0,
-          group_id: 5,
-          group_name: 'GPT-Image',
-          allow_image_generation: true,
+          granted_scopes: ['profile:read', 'account:balance:read', 'images:create'],
+          effective_capabilities: ['images:create'],
+          current_group: 'GPT-Image',
+          current_group_id: 5,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
     )
 
-    const balance = await fetchBalance()
+    const me = await fetchMe()
 
-    expect(balance).toEqual({
-      userId: 123,
+    expect(me).toMatchObject({
+      user_id: 42,
       username: 'alice',
-      creditRemaining: 12.34,
-      currencyDisplay: 'CNY',
-      rateMultiplier: 1.0,
-      groupId: 5,
-      groupName: 'GPT-Image',
-      allowImageGeneration: true,
+      balance: 9.99,
+      currency_display: 'CNY',
+      effective_capabilities: ['images:create'],
     })
-
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toMatch(/\/account\/balance$/)
-    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer sk_oauth_test_access')
-  })
-
-  it('defaults missing optional fields per docs §3.1 (CNY, allowImageGeneration false)', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          user_id: 7,
-          username: 'bob',
-          credit_remaining: 0,
-          group_id: 5,
-          group_name: 'GPT-Image',
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
-
-    const balance = await fetchBalance()
-
-    expect(balance).toMatchObject({
-      userId: 7,
-      currencyDisplay: 'CNY',
-      rateMultiplier: 1,
-      allowImageGeneration: false,
-    })
+    const [url] = fetchMock.mock.calls[0]
+    expect(String(url)).toMatch(/\/me$/)
   })
 
   it('returns null when no token is stored', async () => {
     authMock.__setToken(null)
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-    expect(await fetchBalance()).toBeNull()
+    expect(await fetchMe()).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('triggers a single force-refresh + retry on OAuth invalid_token 401', async () => {
-    const forceRefreshSpy = vi.mocked(sakrylleAuth.forceRefreshToken).mockImplementation(async () => {
-      authMock.__setToken({
-        accessToken: 'sk_oauth_rotated',
-        refreshToken: 'rt_rotated',
-        expiresAt: Date.now() + 60 * 60 * 1000,
-        scope: 'image_generation balance:read models:read',
-      })
-      return authMock.__getToken()
+  it('returns null on non-401 error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('server error', { status: 500 }),
+    )
+    expect(await fetchMe()).toBeNull()
+  })
+
+  it('throws oauth_logged_out on 401', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    await expect(fetchMe()).rejects.toThrow('oauth_logged_out')
+  })
+})
+
+describe('fetchBalance', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    authMock.__setToken(null)
+  })
+
+  describe('v1 token path (legacy /account/balance)', () => {
+    beforeEach(() => {
+      seedToken()
     })
 
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: 'invalid_token', error_description: 'expired' }),
-          { status: 401, headers: { 'Content-Type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
+    it('parses the docs §3.1 schema into the SakrylleBalance shape', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
         new Response(
           JSON.stringify({
-            user_id: 1,
+            user_id: 123,
             username: 'alice',
-            credit_remaining: 5,
-            currency_display: 'USD',
+            credit_remaining: 12.34,
+            currency_display: 'CNY',
+            rate_multiplier: 1.0,
             group_id: 5,
             group_name: 'GPT-Image',
             allow_image_generation: true,
@@ -169,27 +158,190 @@ describe('fetchBalance', () => {
         ),
       )
 
-    const balance = await fetchBalance()
+      const balance = await fetchBalance()
 
-    expect(balance).toMatchObject({ creditRemaining: 5, currencyDisplay: 'USD' })
-    expect(forceRefreshSpy).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(balance).toEqual({
+        userId: 123,
+        username: 'alice',
+        creditRemaining: 12.34,
+        currencyDisplay: 'CNY',
+        rateMultiplier: 1.0,
+        groupId: 5,
+        groupName: 'GPT-Image',
+        allowImageGeneration: true,
+      })
 
-    const retryHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers)
-    expect(retryHeaders.get('Authorization')).toBe('Bearer sk_oauth_rotated')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(String(url)).toMatch(/\/account\/balance$/)
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer sk_oauth_test_access')
+    })
+
+    it('defaults missing optional fields per docs §3.1 (CNY, allowImageGeneration false)', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            user_id: 7,
+            username: 'bob',
+            credit_remaining: 0,
+            group_id: 5,
+            group_name: 'GPT-Image',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+
+      const balance = await fetchBalance()
+
+      expect(balance).toMatchObject({
+        userId: 7,
+        currencyDisplay: 'CNY',
+        rateMultiplier: 1,
+        allowImageGeneration: false,
+      })
+    })
+
+    it('returns null when no token is stored', async () => {
+      authMock.__setToken(null)
+      const fetchMock = vi.spyOn(globalThis, 'fetch')
+      expect(await fetchBalance()).toBeNull()
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('triggers a single force-refresh + retry on OAuth invalid_token 401', async () => {
+      vi.mocked(sakrylleAuth.forceRefreshToken).mockReset()
+      const forceRefreshSpy = vi.mocked(sakrylleAuth.forceRefreshToken).mockImplementation(async () => {
+        authMock.__setToken({
+          accessToken: 'sk_oauth_rotated',
+          refreshToken: 'rt_rotated',
+          expiresAt: Date.now() + 60 * 60 * 1000,
+          scope: 'image_generation balance:read models:read',
+        })
+        return authMock.__getToken()
+      })
+
+      const fetchMock = vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: 'invalid_token', error_description: 'expired' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              user_id: 1,
+              username: 'alice',
+              credit_remaining: 5,
+              currency_display: 'USD',
+              group_id: 5,
+              group_name: 'GPT-Image',
+              allow_image_generation: true,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+
+      const balance = await fetchBalance()
+
+      expect(balance).toMatchObject({ creditRemaining: 5, currencyDisplay: 'USD' })
+      expect(forceRefreshSpy).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+
+      const retryHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers)
+      expect(retryHeaders.get('Authorization')).toBe('Bearer sk_oauth_rotated')
+    })
+
+    it('logs out and throws when refresh fails after OAuth 401 (terminal path)', async () => {
+      const logoutSpy = vi.mocked(sakrylleAuth.logout)
+      vi.mocked(sakrylleAuth.forceRefreshToken).mockResolvedValue(null)
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: 'invalid_token' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+
+      await expect(fetchBalance()).rejects.toThrow('oauth_logged_out')
+      expect(logoutSpy).toHaveBeenCalled()
+    })
   })
 
-  it('logs out and throws when refresh fails after OAuth 401 (terminal path)', async () => {
-    const logoutSpy = vi.mocked(sakrylleAuth.logout)
-    vi.mocked(sakrylleAuth.forceRefreshToken).mockResolvedValue(null)
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: 'invalid_token' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
+  describe('v2 token path (/v1/me with account:balance:read scope)', () => {
+    beforeEach(() => {
+      seedV2Token()
+    })
 
-    await expect(fetchBalance()).rejects.toThrow('oauth_logged_out')
-    expect(logoutSpy).toHaveBeenCalled()
+    it('uses /v1/me when token has account:balance:read scope', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            user_id: 99,
+            username: 'carol',
+            balance: 42.00,
+            currency_display: 'CNY',
+            granted_scopes: ['profile:read', 'account:balance:read', 'images:create'],
+            effective_capabilities: ['images:create'],
+            current_group: 'GPT-Image',
+            current_group_id: 5,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+
+      const balance = await fetchBalance()
+
+      expect(balance).toEqual({
+        userId: 99,
+        username: 'carol',
+        creditRemaining: 42.00,
+        currencyDisplay: 'CNY',
+        rateMultiplier: 1,
+        groupId: 5,
+        groupName: 'GPT-Image',
+        allowImageGeneration: true,
+      })
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url] = fetchMock.mock.calls[0]
+      expect(String(url)).toMatch(/\/me$/)
+    })
+
+    it('falls back to /account/balance when /v1/me omits balance', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch')
+        // First call: /v1/me without balance
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              user_id: 99,
+              granted_scopes: ['account:balance:read'],
+              effective_capabilities: ['images:create'],
+              // balance intentionally absent
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+        // Second call: legacy /account/balance
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              user_id: 99,
+              username: 'carol',
+              credit_remaining: 7.77,
+              group_id: 5,
+              group_name: 'GPT-Image',
+              allow_image_generation: true,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+
+      const balance = await fetchBalance()
+
+      expect(balance?.creditRemaining).toBe(7.77)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      const [url2] = fetchMock.mock.calls[1]
+      expect(String(url2)).toMatch(/\/account\/balance$/)
+    })
   })
 })

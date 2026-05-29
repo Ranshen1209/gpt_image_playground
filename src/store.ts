@@ -44,7 +44,7 @@ import {
 import { callImageApi } from './lib/api'
 import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage, type BatchImageCallResult } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
-import { getImageFetchCorsHint, messageContainsImageFetchCorsHint } from './lib/imageApiShared'
+import { getImageFetchCorsHint, mergeActualParams, messageContainsImageFetchCorsHint } from './lib/imageApiShared'
 import {
   SENTINEL_AGENT_STOPPED,
   SENTINEL_OPENAI_INTERRUPTED,
@@ -3297,8 +3297,9 @@ async function executeAgentRound(
 
       const imgId = await storeImage(image.dataUrl, 'generated')
       cacheImage(imgId, image.dataUrl)
+      const sizeParams = await readImageSizeParam(image.dataUrl)
       const actualParams: Partial<TaskParams> = {
-        ...(Object.keys(image.actualParams ?? {}).length ? image.actualParams : {}),
+        ...(image.actualParams?.size ? image.actualParams : mergeActualParams(image.actualParams, sizeParams) ?? {}),
         n: 1,
       }
       updateTaskInStore(taskId, {
@@ -3653,8 +3654,9 @@ async function executeAgentRound(
         const promptRefs = await resolveReferenceImages(promptRefIds)
         const imgId = await storeImage(image.dataUrl, 'generated')
         cacheImage(imgId, image.dataUrl)
+        const sizeParams = await readImageSizeParam(image.dataUrl)
         const actualParams: Partial<TaskParams> = {
-          ...(Object.keys(image.actualParams ?? {}).length ? image.actualParams : {}),
+          ...(image.actualParams?.size ? image.actualParams : mergeActualParams(image.actualParams, sizeParams) ?? {}),
           n: 1,
         }
         const task: TaskRecord = {
@@ -3970,8 +3972,14 @@ async function executeTask(taskId: string) {
       cacheImage(imgId, dataUrl)
       outputIds.push(imgId)
     }
-    const actualParamsList = result.actualParamsList
-    const actualParams = { ...result.actualParams, n: outputIds.length }
+    const imageSizeParamsList = await resolveImageSizeParamsList(result.images, result.actualParamsList)
+    const actualParamsList = result.images.map((_, index) => {
+      const apiParams = result.actualParamsList?.[index]
+      const sizeParams = imageSizeParamsList[index]
+      if (apiParams?.size) return apiParams
+      return mergeActualParams(apiParams, sizeParams)
+    })
+    const actualParams = { ...mergeActualParams(actualParamsList[0]), n: outputIds.length }
     const actualParamsByImage = mapActualParamsByImage(outputIds, actualParamsList)
     const revisedPromptByImage = result.revisedPrompts?.reduce<Record<string, string>>((acc, revisedPrompt, index) => {
       const imgId = outputIds[index]

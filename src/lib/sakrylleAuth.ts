@@ -1,13 +1,18 @@
 // Sakrylle OAuth 2.0 Authorization Code + PKCE flow.
 // 与 sub.sakrylle.com 的 /oauth/authorize、/oauth/token 端点对接。
-// 详见 docs/OAUTH_CLIENT_INTEGRATION.md (§2, §4)。
+// 详见 docs/OAUTH_V2_INTEGRATION.md (§3, §5, §9)。
+// v2 canonical scopes: profile:read account:balance:read models:read images:create responses:create offline_access
+// Legacy v1 aliases (image_generation, balance:read) remain accepted during the deprecation window.
 
 import i18n from './i18n'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const OAUTH_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_BASE) || 'https://sub.sakrylle.com'
 const CLIENT_ID = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_CLIENT_ID) || 'sakrylle-image-playground'
-const SCOPE = 'image_generation balance:read models:read'
+// v2 canonical scopes — ONE token grants access to both Images API and Responses API.
+// offline_access is required to receive a refresh token.
+// profile:read enables /v1/me user info endpoint.
+const SCOPE = 'profile:read account:balance:read models:read images:create responses:create offline_access'
 
 const AUTH_STORAGE_KEY = 'sakrylle-image-playground.auth'
 const PKCE_VERIFIER_KEY = 'sakrylle-image-playground.pkce-verifier'
@@ -21,12 +26,16 @@ export interface SakrylleAuthToken {
   refreshToken?: string
   expiresAt: number
   scope?: string
+  /** Absolute expiry of the refresh token family (epoch ms). Rotation does NOT extend this. */
+  refreshTokenExpiresAt?: number
 }
 
 interface OAuthTokenResponse {
   access_token: string
   refresh_token?: string
   expires_in?: number
+  /** Seconds until the refresh token family expires (family-anchored, not rolling). */
+  refresh_token_expires_in?: number
   scope?: string
 }
 
@@ -62,7 +71,7 @@ function generateState(): string {
 
 function tokenFromPayload(
   payload: OAuthTokenResponse,
-  opts: { requireRefresh: boolean; previousScope?: string },
+  opts: { requireRefresh: boolean; previousScope?: string; previousRefreshTokenExpiresAt?: number },
 ): SakrylleAuthToken {
   // docs §2.1 — authorization_code grant must return refresh_token.
   // docs §2.4 — refresh_token must rotate on every refresh. If the server
@@ -71,11 +80,24 @@ function tokenFromPayload(
   if (opts.requireRefresh && !payload.refresh_token) {
     throw new Error('OAuth refresh_token rotation missing — terminal')
   }
+
+  // v2 §5: refresh_token_expires_in is family-anchored (inherits original grant's absolute expiry).
+  // On initial grant: compute from now + refresh_token_expires_in.
+  // On rotation: server echoes the remaining TTL of the original family — use it.
+  // If the server omits it on rotation, fall back to the previous stored value.
+  let refreshTokenExpiresAt: number | undefined
+  if (payload.refresh_token_expires_in != null) {
+    refreshTokenExpiresAt = Date.now() + payload.refresh_token_expires_in * 1000
+  } else if (opts.previousRefreshTokenExpiresAt != null) {
+    refreshTokenExpiresAt = opts.previousRefreshTokenExpiresAt
+  }
+
   return {
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token,
     expiresAt: Date.now() + (payload.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
     scope: payload.scope ?? opts.previousScope,
+    refreshTokenExpiresAt,
   }
 }
 
@@ -161,8 +183,44 @@ export function logout(): void {
   window.sessionStorage.removeItem(PKCE_STATE_KEY)
 }
 
+// RFC 7009 token revocation — docs §9.
+// Returns silently on any error (server returns 200 even for unknown tokens).
+async function revokeToken(token: string, hint: 'refresh_token' | 'access_token'): Promise<void> {
+  try {
+    const body = new URLSearchParams({
+      token,
+      token_type_hint: hint,
+      client_id: CLIENT_ID,
+    })
+    await fetch(`${OAUTH_BASE}/oauth/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+  } catch {
+    // Revocation is best-effort; network errors must not block logout.
+  }
+}
+
+// Revoke the stored refresh token (preferred) then clear local state.
+// Fire-and-forget: UI should not wait for the network call.
+export function logoutAndRevoke(): void {
+  const token = getStoredToken()
+  logout()
+  if (token?.refreshToken) {
+    void revokeToken(token.refreshToken, 'refresh_token')
+  }
+}
+
 async function performRefresh(token: SakrylleAuthToken): Promise<SakrylleAuthToken | null> {
   if (!token.refreshToken) {
+    logout()
+    return null
+  }
+
+  // v2 §5: family-anchored expiry — if the refresh token family has expired,
+  // force re-auth instead of attempting a refresh that will fail with reuse detection.
+  if (token.refreshTokenExpiresAt != null && Date.now() >= token.refreshTokenExpiresAt) {
     logout()
     return null
   }
@@ -182,7 +240,12 @@ async function performRefresh(token: SakrylleAuthToken): Promise<SakrylleAuthTok
     const payload = await response.json() as OAuthTokenResponse
     // docs §2.4 — strict rotation: tokenFromPayload throws if refresh_token
     // is missing. Any error here is terminal per §4.3.
-    const next = tokenFromPayload(payload, { requireRefresh: true, previousScope: token.scope })
+    // Pass previousRefreshTokenExpiresAt so family expiry is preserved across rotations.
+    const next = tokenFromPayload(payload, {
+      requireRefresh: true,
+      previousScope: token.scope,
+      previousRefreshTokenExpiresAt: token.refreshTokenExpiresAt,
+    })
     saveToken(next)
     return next
   } catch {

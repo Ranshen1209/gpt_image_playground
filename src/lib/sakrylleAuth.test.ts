@@ -57,6 +57,7 @@ import {
   getStoredToken,
   handleCallback,
   logout,
+  logoutAndRevoke,
   refreshIfNeeded,
 } from './sakrylleAuth'
 
@@ -101,7 +102,8 @@ describe('handleCallback', () => {
         access_token: 'sk_oauth_at',
         refresh_token: 'rt_initial',
         expires_in: 3600,
-        scope: 'image_generation balance:read models:read',
+        refresh_token_expires_in: 2592000,
+        scope: 'profile:read account:balance:read models:read images:create responses:create offline_access',
       }),
     )
 
@@ -113,9 +115,12 @@ describe('handleCallback', () => {
 
     expect(token.accessToken).toBe('sk_oauth_at')
     expect(token.refreshToken).toBe('rt_initial')
-    expect(token.scope).toBe('image_generation balance:read models:read')
+    expect(token.scope).toBe('profile:read account:balance:read models:read images:create responses:create offline_access')
     expect(token.expiresAt).toBeGreaterThanOrEqual(before + 3600 * 1000)
     expect(token.expiresAt).toBeLessThanOrEqual(after + 3600 * 1000)
+    // v2: refreshTokenExpiresAt should be stored from refresh_token_expires_in
+    expect(token.refreshTokenExpiresAt).toBeGreaterThanOrEqual(before + 2592000 * 1000)
+    expect(token.refreshTokenExpiresAt).toBeLessThanOrEqual(after + 2592000 * 1000)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
@@ -134,6 +139,7 @@ describe('handleCallback', () => {
     const stored = JSON.parse(mockLocalStorage.getItem(AUTH_STORAGE_KEY)!)
     expect(stored.accessToken).toBe('sk_oauth_at')
     expect(stored.refreshToken).toBe('rt_initial')
+    expect(stored.refreshTokenExpiresAt).toBeGreaterThan(0)
 
     expect(mockSessionStorage.getItem(PKCE_STATE_KEY)).toBeNull()
     expect(mockSessionStorage.getItem(PKCE_VERIFIER_KEY)).toBeNull()
@@ -201,6 +207,7 @@ describe('refreshIfNeeded', () => {
     refreshToken?: string
     expiresAt: number
     scope?: string
+    refreshTokenExpiresAt?: number
   }): void {
     mockLocalStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(token))
   }
@@ -251,6 +258,45 @@ describe('refreshIfNeeded', () => {
     const stored = JSON.parse(mockLocalStorage.getItem(AUTH_STORAGE_KEY)!)
     expect(stored.accessToken).toBe('new')
     expect(stored.refreshToken).toBe('rt-new')
+  })
+
+  it('preserves refreshTokenExpiresAt across rotations (family-anchored expiry)', async () => {
+    const familyExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
+    seedToken({
+      accessToken: 'old',
+      refreshToken: 'rt-old',
+      expiresAt: Date.now() + 1000,
+      scope: 'profile:read account:balance:read',
+      refreshTokenExpiresAt: familyExpiry,
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'new',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+        // Server echoes remaining TTL — simulate a slightly smaller value
+        refresh_token_expires_in: Math.floor((familyExpiry - Date.now()) / 1000),
+      }),
+    )
+
+    const token = await refreshIfNeeded()
+    expect(token?.refreshTokenExpiresAt).toBeDefined()
+    // The new refreshTokenExpiresAt should be close to the original family expiry
+    expect(token!.refreshTokenExpiresAt!).toBeGreaterThan(Date.now())
+  })
+
+  it('logs out without fetching when the refresh token family has expired', async () => {
+    seedToken({
+      accessToken: 'old',
+      refreshToken: 'rt-old',
+      expiresAt: Date.now() + 1000, // needs refresh
+      refreshTokenExpiresAt: Date.now() - 1000, // family already expired
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const token = await refreshIfNeeded()
+    expect(token).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
   })
 
   it('logs out and returns null when the refresh response is not ok', async () => {
@@ -342,6 +388,63 @@ describe('logout', () => {
   })
 })
 
+describe('logoutAndRevoke', () => {
+  it('clears local state and fires a revocation request for the refresh token', async () => {
+    const REVOKE_URL = 'https://sub.sakrylle.com/oauth/revoke'
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({ accessToken: 'sk_oauth_at', refreshToken: 'rt_to_revoke', expiresAt: Date.now() + 60_000 }),
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    )
+
+    logoutAndRevoke()
+
+    // Local state cleared synchronously
+    expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
+
+    // Allow the fire-and-forget revocation to settle
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe(REVOKE_URL)
+    expect(init?.method).toBe('POST')
+    const body = new URLSearchParams(init?.body as string)
+    expect(body.get('token')).toBe('rt_to_revoke')
+    expect(body.get('token_type_hint')).toBe('refresh_token')
+    expect(body.get('client_id')).toBe('sakrylle-image-playground')
+  })
+
+  it('clears local state even when there is no refresh token to revoke', async () => {
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({ accessToken: 'sk_oauth_at', expiresAt: Date.now() + 60_000 }),
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+
+    logoutAndRevoke()
+
+    expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not throw when the revocation request fails', async () => {
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({ accessToken: 'sk_oauth_at', refreshToken: 'rt_bad', expiresAt: Date.now() + 60_000 }),
+    )
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network error'))
+
+    logoutAndRevoke()
+    expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
+    // Should not throw even after the promise settles
+    await expect(new Promise((r) => setTimeout(r, 10))).resolves.toBeUndefined()
+  })
+})
+
 describe('beginLogin', () => {
   it('writes PKCE artifacts and navigates to /oauth/authorize with required params', async () => {
     await beginLogin()
@@ -363,6 +466,6 @@ describe('beginLogin', () => {
     expect(params.get('code_challenge_method')).toBe('S256')
     expect(params.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]+$/)
     expect(params.get('state')).toBe(state)
-    expect(params.get('scope')).toBe('image_generation balance:read models:read')
+    expect(params.get('scope')).toBe('profile:read account:balance:read models:read images:create responses:create offline_access')
   })
 })
