@@ -59,11 +59,11 @@ export function getAvailableGroups(
       : (scope: string) => scope.includes('responses:create')
 
   return allTokens
-    .filter((t) => t.group && scopeFilter(t.scope))
+    .filter((t) => t.group && scopeFilter(t.scope ?? ''))
     .map((t) => ({
       groupId: t.group!.id,
       groupName: t.group!.name,
       accessToken: t.accessToken,
-      scope: t.scope,
+      scope: t.scope ?? '',
     }))
 }
