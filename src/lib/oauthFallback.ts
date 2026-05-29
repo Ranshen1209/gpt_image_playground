@@ -6,6 +6,7 @@
 
 import type { ApiProfile } from '../types'
 import { getStoredToken, refreshIfNeeded } from './sakrylleAuth'
+import { getSelectedGroups } from './groupSelection'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const SAKRYLLE_API_BASE = (readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_PLATFORM_API)
@@ -44,6 +45,7 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
 // Returns the Bearer token string to use in Authorization header.
 // Prefers profile.apiKey; falls back to a refreshed OAuth access_token.
 // For multi-token scenarios, selects the token matching the profile's apiMode.
+// Prioritizes user's selected group if available.
 // Throws if neither is available — caller (image API) treats as auth error.
 export async function resolveBearerToken(profile: ApiProfile): Promise<string> {
   const explicit = profile.apiKey.trim()
@@ -56,20 +58,32 @@ export async function resolveBearerToken(profile: ApiProfile): Promise<string> {
 
   // Select the appropriate token based on apiMode
   const allTokens = [
-    { scope: token.scope ?? '', accessToken: token.accessToken },
-    ...(token.additionalTokens ?? []).map(t => ({ scope: t.scope ?? '', accessToken: t.accessToken }))
+    { scope: token.scope ?? '', accessToken: token.accessToken, groupId: token.group?.id },
+    ...(token.additionalTokens ?? []).map(t => ({ scope: t.scope ?? '', accessToken: t.accessToken, groupId: t.group?.id }))
   ]
+
+  // Get user's selected group for this apiMode
+  const selectedGroups = getSelectedGroups()
+  const selectedGroupId = profile.apiMode === 'images' ? selectedGroups.images : selectedGroups.responses
 
   let selectedToken: string | undefined
 
   if (profile.apiMode === 'images') {
-    selectedToken = allTokens.find(t =>
+    const matchingTokens = allTokens.filter(t =>
       t.scope.includes('images:create') || t.scope.includes('image_generation')
-    )?.accessToken
+    )
+    // Prefer user's selected group, fallback to first match
+    selectedToken = selectedGroupId
+      ? matchingTokens.find(t => t.groupId === selectedGroupId)?.accessToken
+      : matchingTokens[0]?.accessToken
   } else if (profile.apiMode === 'responses') {
-    selectedToken = allTokens.find(t =>
+    const matchingTokens = allTokens.filter(t =>
       t.scope.includes('responses:create')
-    )?.accessToken
+    )
+    // Prefer user's selected group, fallback to first match
+    selectedToken = selectedGroupId
+      ? matchingTokens.find(t => t.groupId === selectedGroupId)?.accessToken
+      : matchingTokens[0]?.accessToken
   }
 
   if (!selectedToken) throw new Error('missing_credentials')
