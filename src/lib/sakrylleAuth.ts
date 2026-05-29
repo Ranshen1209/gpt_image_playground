@@ -28,6 +28,15 @@ export interface SakrylleAuthToken {
   scope?: string
   /** Absolute expiry of the refresh token family (epoch ms). Rotation does NOT extend this. */
   refreshTokenExpiresAt?: number
+  /** Additional tokens for other groups (from OAuth multi-group authorization) */
+  additionalTokens?: Array<{
+    accessToken: string
+    expiresAt: number
+    scope?: string
+    group?: { id: number; name: string }
+  }>
+  /** Primary token's group info */
+  group?: { id: number; name: string }
 }
 
 interface OAuthTokenResponse {
@@ -37,6 +46,13 @@ interface OAuthTokenResponse {
   /** Seconds until the refresh token family expires (family-anchored, not rolling). */
   refresh_token_expires_in?: number
   scope?: string
+  group?: { id: number; name: string }
+  additional_tokens?: Array<{
+    access_token: string
+    expires_in?: number
+    scope?: string
+    group?: { id: number; name: string }
+  }>
 }
 
 export function getRedirectUri(): string {
@@ -98,6 +114,13 @@ function tokenFromPayload(
     expiresAt: Date.now() + (payload.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
     scope: payload.scope ?? opts.previousScope,
     refreshTokenExpiresAt,
+    group: payload.group,
+    additionalTokens: payload.additional_tokens?.map((t) => ({
+      accessToken: t.access_token,
+      expiresAt: Date.now() + (t.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
+      scope: t.scope,
+      group: t.group,
+    })),
   }
 }
 
