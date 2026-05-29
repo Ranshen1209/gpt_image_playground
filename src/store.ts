@@ -1225,7 +1225,13 @@ export const useStore = create<AppState>()(
         const activeProfile = getActiveApiProfile(settings)
         const agentValidationError = getAgentProfileValidationError(settings)
 
-        if (!agentValidationError) {
+        // Check if profile supports Responses API (either via apiMode or OAuth token scope)
+        const supportsResponsesApi = activeProfile.provider === 'openai' && (
+          activeProfile.apiMode === 'responses' ||
+          canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' })
+        )
+
+        if (!agentValidationError || supportsResponsesApi) {
           const galleryInputDraft = saveGalleryInputDraft(state)
           const savedAgentScrollTop = state.activeAgentConversationId
             ? state.agentScrollPositions[state.activeAgentConversationId]
@@ -1270,7 +1276,7 @@ export const useStore = create<AppState>()(
           return
         }
 
-        if (settings.agentApiConfigMode === 'off' && activeProfile.provider === 'openai' && activeProfile.apiMode !== 'responses') {
+        if (activeProfile.provider === 'openai') {
           state.setConfirmDialog({
             title: i18n.t('errors.needResponsesApiTitle'),
             message: i18n.t('errors.needResponsesApiMessage', { name: activeProfile.name }),
