@@ -1125,9 +1125,24 @@ export const useStore = create<AppState>()(
           const availableGroups = getAvailableGroups(token, 'responses')
           const selectedGroups = getSelectedGroups()
 
-          // If multiple groups available and no selection made, auto-select the first one
+          // If multiple groups available and no selection made, prompt user to choose
           if (availableGroups.length > 1 && !selectedGroups.responses) {
-            setSelectedGroup('responses', availableGroups[0].groupId)
+            state.setConfirmDialog({
+              title: i18n.t('agent.selectGroupTitle'),
+              message: i18n.t('agent.selectGroupMessage', { count: availableGroups.length }),
+              icon: 'info',
+              showCancel: true,
+              cancelText: i18n.t('common.cancel'),
+              buttons: availableGroups.slice(0, 4).map((group) => ({
+                label: group.groupName,
+                tone: 'primary' as const,
+                action: () => {
+                  setSelectedGroup('responses', group.groupId)
+                  useStore.getState().setAppMode('agent')
+                },
+              })),
+            })
+            return
           }
 
           const galleryInputDraft = saveGalleryInputDraft(state)
