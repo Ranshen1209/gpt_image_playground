@@ -1,5 +1,6 @@
 // Sakrylle 账户余额 + 模型列表拉取。
-// 详见 docs/OAUTH_CLIENT_INTEGRATION.md (§3.1, §6.3)。
+// 详见 docs/OAUTH_V2_INTEGRATION.md (§7)。
+// v2: /v1/me endpoint returns user profile + balance when account:balance:read scope is granted.
 
 import { forceRefreshToken, getStoredToken, logout, refreshIfNeeded } from './sakrylleAuth'
 import { readRuntimeEnv } from './runtimeEnv'
@@ -27,6 +28,24 @@ export interface SakrylleModel {
   perRequestPriceUsd?: number
 }
 
+/** v2 /v1/me response — fields are scope-cropped per docs §7. */
+export interface SakrylleMePayload {
+  user_id?: number
+  username?: string
+  display_name?: string
+  avatar_url?: string
+  locale?: string
+  balance?: number
+  currency_display?: 'CNY' | 'USD'
+  granted_scopes: string[]
+  effective_capabilities: string[]
+  current_group?: string
+  current_group_id?: number
+  allowed_groups?: unknown[]
+  quota?: unknown
+  capabilities?: unknown
+}
+
 interface BalancePayload {
   user_id: number
   username: string
@@ -48,7 +67,7 @@ interface ModelsPayload {
   }>
 }
 
-// Deduped force-refresh per docs/OAUTH_CLIENT_INTEGRATION.md §6.3 — multiple in-flight
+// Deduped force-refresh per docs/OAUTH_V2_INTEGRATION.md §5 — multiple in-flight
 // 401s collapse into a single rotation call so we never burn a refresh_token twice.
 let refreshInFlight: Promise<boolean> | null = null
 
@@ -89,7 +108,7 @@ function buildRequestInit(token: string, init?: RequestInit): RequestInit {
   return { ...init, headers, cache: init?.cache ?? 'no-store' }
 }
 
-// Authed fetch with auto-refresh on OAuth-shell 401 (docs §3 + §4.3 + §6.3).
+// Authed fetch with auto-refresh on OAuth-shell 401 (docs §3 + §4.3 + §5).
 // Single retry: refresh failure or post-retry 401 → terminal logout.
 async function authedFetch(path: string, init?: RequestInit): Promise<Response | null> {
   const initialToken = await refreshIfNeeded() ?? getStoredToken()
@@ -121,7 +140,51 @@ async function authedFetch(path: string, init?: RequestInit): Promise<Response |
   return retried
 }
 
+// v2 /v1/me endpoint — docs §7. Returns null on auth failure (triggers logout).
+// Fields are scope-cropped: balance requires account:balance:read,
+// profile fields require profile:read.
+export async function fetchMe(): Promise<SakrylleMePayload | null> {
+  const response = await authedFetch('me')
+  if (!response) return null
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('oauth_logged_out')
+    }
+    return null
+  }
+  try {
+    return await response.json() as SakrylleMePayload
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'parse error'
+    console.warn('Sakrylle /v1/me parse failed:', message)
+    return null
+  }
+}
+
 export async function fetchBalance(): Promise<SakrylleBalance | null> {
+  // v2: if the token has account:balance:read scope, /v1/me includes balance.
+  // Fall back to the legacy /account/balance endpoint for v1 tokens.
+  const token = getStoredToken()
+  const hasV2Scope = token?.scope?.includes('account:balance:read') ?? false
+
+  if (hasV2Scope) {
+    const me = await fetchMe()
+    if (me === null) return null
+    // /v1/me may not include group info — fall through to legacy endpoint if missing.
+    if (me.balance != null && me.user_id != null) {
+      return {
+        userId: me.user_id,
+        username: me.username ?? '',
+        creditRemaining: me.balance,
+        currencyDisplay: me.currency_display ?? 'CNY',
+        rateMultiplier: 1,
+        groupId: me.current_group_id ?? 0,
+        groupName: me.current_group ?? '',
+        allowImageGeneration: me.effective_capabilities.includes('images:create'),
+      }
+    }
+  }
+
   const response = await authedFetch('account/balance')
   if (!response) return null
   if (!response.ok) {
