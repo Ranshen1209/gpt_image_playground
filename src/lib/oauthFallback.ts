@@ -25,13 +25,17 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
   const token = getStoredToken()
   if (!token) return false
 
-  // 根据 OAuth token 的 scope 判断能否用于当前 apiMode
-  const scope = token.scope ?? ''
+  // Check if any token (primary or additional) supports the requested apiMode
+  const allTokens = [
+    { scope: token.scope ?? '', accessToken: token.accessToken },
+    ...(token.additionalTokens ?? []).map(t => ({ scope: t.scope ?? '', accessToken: t.accessToken }))
+  ]
+
   if (profile.apiMode === 'images') {
-    return scope.includes('images:create') || scope.includes('image_generation')
+    return allTokens.some(t => t.scope.includes('images:create') || t.scope.includes('image_generation'))
   }
   if (profile.apiMode === 'responses') {
-    return scope.includes('responses:create')
+    return allTokens.some(t => t.scope.includes('responses:create'))
   }
 
   return false
@@ -39,6 +43,7 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
 
 // Returns the Bearer token string to use in Authorization header.
 // Prefers profile.apiKey; falls back to a refreshed OAuth access_token.
+// For multi-token scenarios, selects the token matching the profile's apiMode.
 // Throws if neither is available — caller (image API) treats as auth error.
 export async function resolveBearerToken(profile: ApiProfile): Promise<string> {
   const explicit = profile.apiKey.trim()
@@ -48,5 +53,25 @@ export async function resolveBearerToken(profile: ApiProfile): Promise<string> {
   }
   const token = (await refreshIfNeeded()) ?? getStoredToken()
   if (!token) throw new Error('missing_credentials')
-  return token.accessToken
+
+  // Select the appropriate token based on apiMode
+  const allTokens = [
+    { scope: token.scope ?? '', accessToken: token.accessToken },
+    ...(token.additionalTokens ?? []).map(t => ({ scope: t.scope ?? '', accessToken: t.accessToken }))
+  ]
+
+  let selectedToken: string | undefined
+
+  if (profile.apiMode === 'images') {
+    selectedToken = allTokens.find(t =>
+      t.scope.includes('images:create') || t.scope.includes('image_generation')
+    )?.accessToken
+  } else if (profile.apiMode === 'responses') {
+    selectedToken = allTokens.find(t =>
+      t.scope.includes('responses:create')
+    )?.accessToken
+  }
+
+  if (!selectedToken) throw new Error('missing_credentials')
+  return selectedToken
 }
