@@ -10,10 +10,21 @@ vi.mock('./sakrylleAuth', () => {
   }
 })
 
-import { getAvailableGroups, getGroupAccessToken, getSelectedGroupId, setSelectedGroup } from './groupSelection'
+vi.mock('./sakrylleAccount', () => {
+  const state: { me: any } = { me: null }
+  return {
+    __esModule: true,
+    __setMe(value: any) { state.me = value },
+    fetchMe: vi.fn(async () => state.me),
+  }
+})
+
+import { fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken, getSelectedGroupId, setSelectedGroup } from './groupSelection'
 import * as sakrylleAuth from './sakrylleAuth'
+import * as sakrylleAccount from './sakrylleAccount'
 
 const authMock = sakrylleAuth as typeof sakrylleAuth & { __setToken: (t: any) => void }
+const accountMock = sakrylleAccount as typeof sakrylleAccount & { __setMe: (me: any) => void }
 
 function createMockStorage(): Storage {
   const map = new Map<string, string>()
@@ -47,6 +58,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   authMock.__setToken(null)
+  accountMock.__setMe(null)
   vi.clearAllMocks()
   vi.unstubAllGlobals()
 })
@@ -62,6 +74,48 @@ describe('getAvailableGroups', () => {
   it('returns empty when no token is stored', () => {
     authMock.__setToken(null)
     expect(getAvailableGroups()).toEqual([])
+  })
+
+  it('uses cached names when a later token only has ids or empty names', async () => {
+    accountMock.__setMe({
+      allowed_groups: [
+        { id: 5, name: 'GPT-Image' },
+        { id: 11, name: 'GPT-Image-4K' },
+      ],
+    })
+    await fetchResponsesApiGroups()
+    authMock.__setToken({
+      accessToken: 'sk_oauth_group11',
+      refreshToken: 'rt_test',
+      expiresAt: Date.now() + 3_600_000,
+      group: { id: 11, name: '' },
+    })
+
+    expect(getAvailableGroups()).toEqual([
+      { id: 11, name: 'GPT-Image-4K' },
+    ])
+  })
+})
+
+describe('fetchResponsesApiGroups', () => {
+  it('prefers /v1/me allowed_groups names over generic token group names', async () => {
+    authMock.__setToken({
+      accessToken: 'sk_oauth_group11',
+      refreshToken: 'rt_test',
+      expiresAt: Date.now() + 3_600_000,
+      group: { id: 11, name: '' },
+    })
+    accountMock.__setMe({
+      allowed_groups: [
+        { id: 5, name: 'GPT-Image' },
+        { id: 11, name: 'GPT-Image-4K' },
+      ],
+    })
+
+    await expect(fetchResponsesApiGroups()).resolves.toEqual([
+      { id: 5, name: 'GPT-Image' },
+      { id: 11, name: 'GPT-Image-4K' },
+    ])
   })
 })
 

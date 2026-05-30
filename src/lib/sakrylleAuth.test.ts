@@ -59,6 +59,7 @@ import {
   logout,
   logoutAndRevoke,
   refreshIfNeeded,
+  refreshWithGroupId,
 } from './sakrylleAuth'
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -208,6 +209,8 @@ describe('refreshIfNeeded', () => {
     expiresAt: number
     scope?: string
     refreshTokenExpiresAt?: number
+    group?: { id: number; name: string }
+    additionalTokens?: Array<{ accessToken: string; expiresAt: number; scope?: string; group?: { id: number; name: string } }>
   }): void {
     mockLocalStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(token))
   }
@@ -258,6 +261,35 @@ describe('refreshIfNeeded', () => {
     const stored = JSON.parse(mockLocalStorage.getItem(AUTH_STORAGE_KEY)!)
     expect(stored.accessToken).toBe('new')
     expect(stored.refreshToken).toBe('rt-new')
+  })
+
+  it('preserves group names when the refresh payload only returns group ids', async () => {
+    seedToken({
+      accessToken: 'old',
+      refreshToken: 'rt-old',
+      expiresAt: Date.now() + 1000,
+      scope: 'images:create responses:create',
+      group: { id: 5, name: 'GPT-Image' },
+      additionalTokens: [
+        { accessToken: 'old-11', expiresAt: Date.now() + 1000, group: { id: 11, name: 'GPT-Image-4K' } },
+      ],
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'new',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+        group: { id: 5, name: '' },
+        additional_tokens: [
+          { access_token: 'new-11', expires_in: 3600, group: { id: 11 } },
+        ],
+      }),
+    )
+
+    const token = await refreshIfNeeded()
+
+    expect(token?.group).toEqual({ id: 5, name: 'GPT-Image' })
+    expect(token?.additionalTokens?.[0].group).toEqual({ id: 11, name: 'GPT-Image-4K' })
   })
 
   it('preserves refreshTokenExpiresAt across rotations (family-anchored expiry)', async () => {
@@ -371,6 +403,38 @@ describe('forceRefreshToken', () => {
 
     expect(token?.accessToken).toBe('rotated')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('refreshWithGroupId', () => {
+  it('uses the previous additional-token group name when switching groups', async () => {
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({
+        accessToken: 'old-5',
+        refreshToken: 'rt-old',
+        expiresAt: Date.now() + 60_000,
+        scope: 'images:create responses:create',
+        group: { id: 5, name: 'GPT-Image' },
+        additionalTokens: [
+          { accessToken: 'old-11', expiresAt: Date.now() + 60_000, group: { id: 11, name: 'GPT-Image-4K' } },
+        ],
+      }),
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'new-11',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+        group: { id: 11 },
+      }),
+    )
+
+    const token = await refreshWithGroupId(11)
+
+    expect(token?.group).toEqual({ id: 11, name: 'GPT-Image-4K' })
+    const body = new URLSearchParams(fetchMock.mock.calls[0][1]?.body as string)
+    expect(body.get('group_id')).toBe('11')
   })
 })
 

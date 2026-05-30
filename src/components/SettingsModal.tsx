@@ -126,8 +126,14 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
       .then((result) => {
         if (cancelled) return
         setGroups(result)
-        const resolvedGroupId = getSelectedGroupId(mode)
-        if (resolvedGroupId) setSelectedGroupId(resolvedGroupId)
+        const selectedGroupId = getSelectedGroups()[mode]
+        const resolvedGroupId = selectedGroupId && result.some((group) => group.id === selectedGroupId)
+          ? selectedGroupId
+          : (result[0]?.id ?? getSelectedGroupId(mode))
+        if (resolvedGroupId) {
+          setSelectedGroupId(resolvedGroupId)
+          if (selectedGroupId !== resolvedGroupId) setSelectedGroup(mode, resolvedGroupId)
+        }
         setLoading(false)
       })
       .catch(() => {
@@ -147,6 +153,15 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
   }
 
   const primaryGroup = sakrylleGetStoredToken()?.group
+  const primaryGroupId = primaryGroup ? Number((primaryGroup as any).id ?? (primaryGroup as any).group_id) : undefined
+  const primaryGroupName = primaryGroupId && Number.isFinite(primaryGroupId)
+    ? groups.find((group) => group.id === primaryGroupId)?.name
+      ?? (typeof (primaryGroup as any).name === 'string' && (primaryGroup as any).name.trim()
+        ? (primaryGroup as any).name.trim()
+        : typeof (primaryGroup as any).group_name === 'string' && (primaryGroup as any).group_name.trim()
+          ? (primaryGroup as any).group_name.trim()
+          : `Group ${primaryGroupId}`)
+    : ''
 
   return (
     <div className="block">
@@ -166,7 +181,7 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
         />
       )}
       <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-        {hint}{primaryGroup ? ` ${t('settings.api.responsesGroupDefault', { name: (primaryGroup as any).name ?? (primaryGroup as any).group_name ?? `Group ${(primaryGroup as any).id ?? (primaryGroup as any).group_id}` })}` : ''}
+        {hint}{primaryGroupName ? ` ${t('settings.api.responsesGroupDefault', { name: primaryGroupName })}` : ''}
       </div>
     </div>
   )

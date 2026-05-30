@@ -40,6 +40,14 @@ export interface SakrylleAuthToken {
   group?: { id: number; name: string }
 }
 
+interface OAuthGroupPayload {
+  id?: number | string
+  group_id?: number | string
+  name?: string
+  group_name?: string
+  title?: string
+}
+
 interface OAuthTokenResponse {
   access_token: string
   refresh_token?: string
@@ -47,12 +55,12 @@ interface OAuthTokenResponse {
   /** Seconds until the refresh token family expires (family-anchored, not rolling). */
   refresh_token_expires_in?: number
   scope?: string
-  group?: { id: number; name: string }
+  group?: OAuthGroupPayload
   additional_tokens?: Array<{
     access_token: string
     expires_in?: number
     scope?: string
-    group?: { id: number; name: string }
+    group?: OAuthGroupPayload
   }>
 }
 
@@ -86,9 +94,52 @@ function generateState(): string {
   return base64UrlEncode(random.buffer)
 }
 
+function parseGroupId(group: OAuthGroupPayload | { id?: number; name?: string } | undefined): number | undefined {
+  const rawId = group?.id ?? (group as OAuthGroupPayload | undefined)?.group_id
+  const id = typeof rawId === 'number' ? rawId : Number(rawId)
+  return Number.isFinite(id) && id > 0 ? id : undefined
+}
+
+function parseGroupName(group: OAuthGroupPayload | { name?: string } | undefined): string | undefined {
+  const rawName = group?.name ?? (group as OAuthGroupPayload | undefined)?.group_name ?? (group as OAuthGroupPayload | undefined)?.title
+  if (typeof rawName !== 'string') return undefined
+  const name = rawName.trim()
+  return name ? name : undefined
+}
+
+function collectPreviousGroups(token?: SakrylleAuthToken): Map<number, { id: number; name: string }> {
+  const groups = new Map<number, { id: number; name: string }>()
+  const addGroup = (group: { id?: number; name?: string } | undefined) => {
+    const id = parseGroupId(group)
+    const name = parseGroupName(group)
+    if (id && name) groups.set(id, { id, name })
+  }
+  addGroup(token?.group)
+  token?.additionalTokens?.forEach((item) => addGroup(item.group))
+  return groups
+}
+
+function normalizeTokenGroup(
+  group: OAuthGroupPayload | undefined,
+  previousGroups: Map<number, { id: number; name: string }>,
+): { id: number; name: string } | undefined {
+  const id = parseGroupId(group)
+  if (!id) return undefined
+  return {
+    id,
+    name: parseGroupName(group) ?? previousGroups.get(id)?.name ?? `Group ${id}`,
+  }
+}
+
 function tokenFromPayload(
   payload: OAuthTokenResponse,
-  opts: { requireRefresh: boolean; previousScope?: string; previousRefreshTokenExpiresAt?: number },
+  opts: {
+    requireRefresh: boolean
+    previousScope?: string
+    previousRefreshTokenExpiresAt?: number
+    previousToken?: SakrylleAuthToken
+    requestedGroupId?: number
+  },
 ): SakrylleAuthToken {
   // docs §2.1 — authorization_code grant must return refresh_token.
   // docs §2.4 — refresh_token must rotate on every refresh. If the server
@@ -109,19 +160,25 @@ function tokenFromPayload(
     refreshTokenExpiresAt = opts.previousRefreshTokenExpiresAt
   }
 
+  const previousGroups = collectPreviousGroups(opts.previousToken)
+  const normalizedGroup = normalizeTokenGroup(payload.group, previousGroups)
+    ?? (opts.requestedGroupId ? previousGroups.get(opts.requestedGroupId) : undefined)
+    ?? (payload.group ? undefined : opts.previousToken?.group)
+  const normalizedAdditionalTokens = payload.additional_tokens?.map((t) => ({
+    accessToken: t.access_token,
+    expiresAt: Date.now() + (t.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
+    scope: t.scope,
+    group: normalizeTokenGroup(t.group, previousGroups),
+  }))
+
   return {
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token,
     expiresAt: Date.now() + (payload.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
     scope: payload.scope ?? opts.previousScope,
     refreshTokenExpiresAt,
-    group: payload.group,
-    additionalTokens: payload.additional_tokens?.map((t) => ({
-      accessToken: t.access_token,
-      expiresAt: Date.now() + (t.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
-      scope: t.scope,
-      group: t.group,
-    })),
+    group: normalizedGroup,
+    additionalTokens: normalizedAdditionalTokens,
   }
 }
 
@@ -275,6 +332,7 @@ async function performRefresh(token: SakrylleAuthToken): Promise<SakrylleAuthTok
       requireRefresh: true,
       previousScope: token.scope,
       previousRefreshTokenExpiresAt: token.refreshTokenExpiresAt,
+      previousToken: token,
     })
     saveToken(next)
     return next
@@ -329,6 +387,8 @@ export async function refreshWithGroupId(groupId: number): Promise<SakrylleAuthT
       requireRefresh: true,
       previousScope: token.scope,
       previousRefreshTokenExpiresAt: token.refreshTokenExpiresAt,
+      previousToken: token,
+      requestedGroupId: groupId,
     })
     saveToken(next)
     return next
