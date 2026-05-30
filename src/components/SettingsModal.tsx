@@ -21,8 +21,8 @@ import {
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout, refreshWithGroupId } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
-import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups } from '../lib/groupSelection'
-import { fetchAllModels, type SakrylleModel } from '../lib/sakrylleAccount'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken } from '../lib/groupSelection'
+import { fetchAllModels, fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -184,19 +184,18 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
   useEffect(() => {
     if (!loggedIn) { setLoading(false); return }
     let cancelled = false
-    const selectedGroupId = getSelectedGroups()[mode]
-    const prepare = (async () => {
-      if (selectedGroupId) {
-        await refreshWithGroupId(selectedGroupId)
-      } else {
-        const groups = await fetchResponsesApiGroups()
-        if (groups.length > 0) {
-          setSelectedGroup(mode, groups[0].id)
-          await refreshWithGroupId(groups[0].id)
-        }
-      }
-    })()
-    prepare.then(() => fetchAllModels()).then((result) => {
+    // Resolve which group this selector lists models for: the previously
+    // chosen group for this mode, else the first available group.
+    let groupId = getSelectedGroups()[mode]
+    if (!groupId) {
+      const first = getAvailableGroups()[0]
+      if (first) { groupId = first.id; setSelectedGroup(mode, first.id) }
+    }
+    // Query /v1/models with THAT group's own access token — no token rotation,
+    // so Images + Responses selectors never race on refreshWithGroupId.
+    const accessToken = getGroupAccessToken(groupId)
+    const fetcher = accessToken ? fetchModelsWithToken(accessToken) : fetchAllModels()
+    fetcher.then((result) => {
       if (cancelled) return
       const filtered = filterImage
         ? result.filter(m => m.allowImageGeneration)
