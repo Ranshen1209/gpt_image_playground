@@ -10,10 +10,22 @@ vi.mock('./sakrylleAuth', () => {
   }
 })
 
-import { getAvailableGroups, getGroupAccessToken } from './groupSelection'
+import { getAvailableGroups, getGroupAccessToken, getSelectedGroupId, setSelectedGroup } from './groupSelection'
 import * as sakrylleAuth from './sakrylleAuth'
 
 const authMock = sakrylleAuth as typeof sakrylleAuth & { __setToken: (t: any) => void }
+
+function createMockStorage(): Storage {
+  const map = new Map<string, string>()
+  return {
+    get length() { return map.size },
+    clear: () => map.clear(),
+    getItem: (key: string) => map.get(key) ?? null,
+    key: (index: number) => Array.from(map.keys())[index] ?? null,
+    removeItem: (key: string) => { map.delete(key) },
+    setItem: (key: string, value: string) => { map.set(key, String(value)) },
+  }
+}
 
 // Primary token bound to group 5 (GPT-Image), plus a per-group token for
 // group 7 (Responses) — mirrors the multi-group OAuth grant shape.
@@ -29,8 +41,15 @@ function seedMultiGroupToken(): void {
   })
 }
 
-beforeEach(() => seedMultiGroupToken())
-afterEach(() => { authMock.__setToken(null); vi.clearAllMocks() })
+beforeEach(() => {
+  vi.stubGlobal('localStorage', createMockStorage())
+  seedMultiGroupToken()
+})
+afterEach(() => {
+  authMock.__setToken(null)
+  vi.clearAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe('getAvailableGroups', () => {
   it('lists primary group plus additional-token groups', () => {
@@ -63,5 +82,21 @@ describe('getGroupAccessToken', () => {
   it('returns undefined when no token is stored', () => {
     authMock.__setToken(null)
     expect(getGroupAccessToken(5)).toBeUndefined()
+  })
+})
+
+describe('getSelectedGroupId', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('keeps the stored group when it is still available', () => {
+    setSelectedGroup('images', 7)
+    expect(getSelectedGroupId('images')).toBe(7)
+  })
+
+  it('falls back to the primary group when the stored group is stale', () => {
+    setSelectedGroup('images', 999)
+    expect(getSelectedGroupId('images')).toBe(5)
   })
 })
