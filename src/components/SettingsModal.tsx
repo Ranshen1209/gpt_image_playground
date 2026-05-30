@@ -170,11 +170,12 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
   )
 }
 
-function ModelSelector({ value, onChange, filterImage, placeholder }: {
+function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
   value: string
   onChange: (value: string) => void
   filterImage: boolean
   placeholder: string
+  mode: 'images' | 'responses'
 }) {
   const [models, setModels] = useState<SakrylleModel[]>([])
   const [loading, setLoading] = useState(true)
@@ -183,18 +184,28 @@ function ModelSelector({ value, onChange, filterImage, placeholder }: {
   useEffect(() => {
     if (!loggedIn) { setLoading(false); return }
     let cancelled = false
-    fetchAllModels()
-      .then((result) => {
-        if (cancelled) return
-        const filtered = filterImage
-          ? result.filter(m => m.allowImageGeneration)
-          : result.filter(m => !m.allowImageGeneration)
-        setModels(filtered)
-        setLoading(false)
-      })
-      .catch(() => { if (!cancelled) setLoading(false) })
+    const selectedGroupId = getSelectedGroups()[mode]
+    const prepare = (async () => {
+      if (selectedGroupId) {
+        await refreshWithGroupId(selectedGroupId)
+      } else {
+        const groups = await fetchResponsesApiGroups()
+        if (groups.length > 0) {
+          setSelectedGroup(mode, groups[0].id)
+          await refreshWithGroupId(groups[0].id)
+        }
+      }
+    })()
+    prepare.then(() => fetchAllModels()).then((result) => {
+      if (cancelled) return
+      const filtered = filterImage
+        ? result.filter(m => m.allowImageGeneration)
+        : result.filter(m => !m.allowImageGeneration)
+      setModels(filtered)
+      setLoading(false)
+    }).catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [loggedIn, filterImage])
+  }, [loggedIn, filterImage, mode])
 
   if (!loggedIn || loading) {
     return (
@@ -1368,6 +1379,7 @@ export default function SettingsModal() {
                   onChange={(v) => { updateActiveProfile({ model: v }); commitActiveProfilePatch({ model: v }) }}
                   filterImage={true}
                   placeholder={DEFAULT_IMAGES_MODEL}
+                  mode="images"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
                   {t('settings.api.modelHintImages', { model: DEFAULT_IMAGES_MODEL })}
@@ -1386,6 +1398,7 @@ export default function SettingsModal() {
                   onChange={(v) => { updateActiveProfile({ responsesModel: v }); commitActiveProfilePatch({ responsesModel: v }) }}
                   filterImage={false}
                   placeholder={DEFAULT_RESPONSES_MODEL}
+                  mode="responses"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
                   {t('settings.api.modelHintResponses', { model: DEFAULT_RESPONSES_MODEL })}
