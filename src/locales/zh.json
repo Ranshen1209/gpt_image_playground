@@ -117,6 +117,7 @@
       "apiModeHint": "支持通过查询参数覆盖：apiMode=images 或 apiMode=responses。",
       "responsesGroup": "Responses API 分组",
       "responsesGroupHint": "Agent 模式使用的分组，切换后会刷新令牌。",
+      "responsesGroupDefault": "当前默认：{{name}}。",
       "responsesGroupLoading": "加载分组...",
       "responsesGroupNone": "未选择（使用默认）",
       "modelId": "模型 ID",
