@@ -88,7 +88,19 @@ function normalizeGroup(raw: any): SakrylleGroup | null {
       : typeof raw.title === 'string' && raw.title.trim()
         ? raw.title.trim()
         : ''
-  return { id: normalizedId, name: rawName || cachedName || `Group ${normalizedId}` }
+  const rawCapabilities = Array.isArray(raw.capabilities)
+    ? raw.capabilities
+    : Array.isArray(raw.effective_capabilities)
+      ? raw.effective_capabilities
+      : []
+  const capabilities = rawCapabilities
+    .filter((capability: unknown): capability is string => typeof capability === 'string' && Boolean(capability.trim()))
+    .map((capability: string) => capability.trim())
+  return {
+    id: normalizedId,
+    name: rawName || cachedName || `Group ${normalizedId}`,
+    ...(capabilities.length ? { capabilities } : {}),
+  }
 }
 
 function mergeGroups(primary: SakrylleGroup[], secondary: SakrylleGroup[]): SakrylleGroup[] {
@@ -104,6 +116,30 @@ function mergeGroups(primary: SakrylleGroup[], secondary: SakrylleGroup[]): Sakr
     }
   }
   return Array.from(merged.values())
+}
+
+function groupSupportsMode(group: SakrylleGroup, apiMode: 'images' | 'responses'): boolean {
+  const capabilities = group.capabilities ?? []
+  if (!capabilities.length) return false
+  if (apiMode === 'images') {
+    return capabilities.some((capability) =>
+      capability === 'images:create' ||
+      capability === 'image_generation' ||
+      capability.includes('image'),
+    )
+  }
+  return capabilities.some((capability) =>
+    capability === 'responses:create' ||
+    capability === 'chat.completions:create' ||
+    capability.includes('responses') ||
+    capability.includes('chat'),
+  )
+}
+
+export function resolveSelectedGroupId(apiMode: 'images' | 'responses', groups: SakrylleGroup[]): number | undefined {
+  const selected = getSelectedGroups()[apiMode]
+  if (selected && groups.some((group) => group.id === selected)) return selected
+  return groups.find((group) => groupSupportsMode(group, apiMode))?.id ?? groups[0]?.id
 }
 
 /** Get available groups from the stored OAuth token (synchronous). */
@@ -129,10 +165,7 @@ export function getSelectedGroupId(apiMode: 'images' | 'responses'): number | un
   const groups = getAvailableGroups()
   if (!groups.length) return undefined
 
-  const selected = getSelectedGroups()[apiMode]
-  if (selected && groups.some((group) => group.id === selected)) return selected
-
-  const fallback = groups[0]?.id
+  const fallback = resolveSelectedGroupId(apiMode, groups)
   if (fallback) setSelectedGroup(apiMode, fallback)
   return fallback
 }
@@ -151,6 +184,17 @@ export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
   } catch {
     return tokenGroups
   }
+}
+
+export async function ensureSelectedGroupId(apiMode: 'images' | 'responses'): Promise<number | undefined> {
+  const tokenGroups = getAvailableGroups()
+  const selected = getSelectedGroups()[apiMode]
+  if (selected && tokenGroups.some((group) => group.id === selected)) return selected
+
+  const groups = await fetchResponsesApiGroups()
+  const resolvedGroupId = resolveSelectedGroupId(apiMode, groups.length ? groups : tokenGroups)
+  if (resolvedGroupId) setSelectedGroup(apiMode, resolvedGroupId)
+  return resolvedGroupId
 }
 
 // Resolve the access token bound to a specific group, WITHOUT rotating the

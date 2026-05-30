@@ -21,7 +21,7 @@ import {
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout, refreshWithGroupId } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
-import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken } from '../lib/groupSelection'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId } from '../lib/groupSelection'
 import { fetchAllModels, fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
@@ -127,12 +127,11 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
         if (cancelled) return
         setGroups(result)
         const selectedGroupId = getSelectedGroups()[mode]
-        const resolvedGroupId = selectedGroupId && result.some((group) => group.id === selectedGroupId)
-          ? selectedGroupId
-          : (result[0]?.id ?? getSelectedGroupId(mode))
+        const resolvedGroupId = resolveSelectedGroupId(mode, result) ?? getSelectedGroupId(mode)
         if (resolvedGroupId) {
           setSelectedGroupId(resolvedGroupId)
           if (selectedGroupId !== resolvedGroupId) setSelectedGroup(mode, resolvedGroupId)
+          if (selectedGroupId !== resolvedGroupId) onGroupChange?.()
         }
         setLoading(false)
       })
@@ -210,14 +209,16 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
     let cancelled = false
     setLoading(true)
     setModels([])
-    // Resolve which group this selector lists models for: the persisted
-    // choice for this mode when still valid, else the current token's default group.
-    const groupId = getSelectedGroupId(mode)
-    // Query /v1/models with THAT group's own access token — no token rotation,
-    // so Images + Responses selectors never race on refreshWithGroupId.
-    const accessToken = getGroupAccessToken(groupId)
-    const fetcher = accessToken ? fetchModelsWithToken(accessToken) : fetchAllModels()
-    fetcher.then((result) => {
+    ;(async () => {
+      // Resolve which group this selector lists models for. On first login
+      // localStorage may not have a group yet, so wait for /v1/me allowed_groups
+      // before choosing the default and fetching that group's models.
+      const groupId = await ensureSelectedGroupId(mode)
+      if (cancelled) return
+      // Query /v1/models with THAT group's own access token — no token rotation,
+      // so Images + Responses selectors never race on refreshWithGroupId.
+      const accessToken = getGroupAccessToken(groupId)
+      const result = accessToken ? await fetchModelsWithToken(accessToken) : await fetchAllModels()
       if (cancelled) return
       const seenModelIds = new Set<string>()
       const filtered = (filterImage
@@ -236,7 +237,7 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
         latestOnChangeRef.current(nextModel)
       }
       setLoading(false)
-    }).catch(() => {
+    })().catch(() => {
       if (!cancelled) {
         setModels([])
         setLoading(false)
