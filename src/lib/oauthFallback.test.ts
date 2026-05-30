@@ -93,24 +93,24 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
-    it('returns false for responses mode without responses:create scope', () => {
+    it('returns true regardless of apiMode when token has images:create scope', () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,
         scope: 'images:create',
       })
-      expect(canUseOAuthForProfile(profile)).toBe(false)
+      expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
-    it('returns false for images mode without images scope', () => {
+    it('returns true regardless of apiMode when token has responses:create scope', () => {
       const profile = createProfile({ apiMode: 'images' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,
         scope: 'responses:create',
       })
-      expect(canUseOAuthForProfile(profile)).toBe(false)
+      expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
     it('handles missing scope field gracefully', () => {
@@ -132,7 +132,7 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
-    it('returns false when additionalTokens exist but none match', () => {
+    it('returns true when primary token has relevant scope even with unrelated additionalTokens', () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'sk_oauth_images',
@@ -146,7 +146,7 @@ describe('oauthFallback', () => {
           },
         ],
       })
-      expect(canUseOAuthForProfile(profile)).toBe(false)
+      expect(canUseOAuthForProfile(profile)).toBe(true)
     })
   })
 
@@ -179,7 +179,7 @@ describe('oauthFallback', () => {
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,
-        scope: 'images:create',
+        scope: 'balance:read',
       })
       await expect(resolveBearerToken(profile)).rejects.toThrow('missing_credentials')
     })

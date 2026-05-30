@@ -19,8 +19,9 @@ import {
   normalizeStreamPartialImages,
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
-import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout } from '../lib/sakrylleAuth'
+import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout, refreshWithGroupId } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups } from '../lib/groupSelection'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -109,6 +110,63 @@ function getImportedProfileFromMergedSettings(
   if (existingProfile) return existingProfile
 
   return nextSettings.profiles.find((profile) => !previousProfileIds.has(profile.id)) ?? nextSettings.profiles[0]
+}
+
+function ResponsesGroupSelector() {
+  const { t } = useTranslation()
+  const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(() => getSelectedGroups().responses)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetchResponsesApiGroups()
+      .then((result) => {
+        if (cancelled) return
+        setGroups(result)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const handleChange = async (value: string | number) => {
+    const groupId = Number(value)
+    if (!groupId) return
+    setSelectedGroupId(groupId)
+    setSelectedGroup('responses', groupId)
+    await refreshWithGroupId(groupId)
+  }
+
+  return (
+    <div className="block">
+      <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
+        {t('settings.api.responsesGroup')}
+      </span>
+      {loading ? (
+        <div className="text-sm text-gray-400 dark:text-gray-500 py-2">
+          {t('settings.api.responsesGroupLoading')}
+        </div>
+      ) : (
+        <Select
+          value={selectedGroupId ?? ''}
+          onChange={handleChange}
+          options={[
+            { label: t('settings.api.responsesGroupNone'), value: '' },
+            ...groups.map((g) => ({ label: g.name, value: g.id })),
+          ]}
+          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+        />
+      )}
+      <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
+        {t('settings.api.responsesGroupHint')}
+      </div>
+    </div>
+  )
 }
 
 export default function SettingsModal() {
@@ -1236,30 +1294,9 @@ export default function SettingsModal() {
                 </div>
               </div>
 
-              {/* 6. API 接口（Images/Responses） */}
-              {activeProfile.provider === 'openai' && (
-                <div className="block">
-                  <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">{t('settings.api.apiMode')}</span>
-                  <Select
-                    value={activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode}
-                    onChange={(value) => {
-                      const apiMode = value as AppSettings['apiMode']
-                      const nextModel =
-                        activeProfile.model === DEFAULT_IMAGES_MODEL || activeProfile.model === DEFAULT_RESPONSES_MODEL
-                          ? getDefaultModelForMode(apiMode)
-                          : activeProfile.model
-                      updateActiveProfile({ apiMode, model: nextModel }, true)
-                    }}
-                    options={[
-                      { label: 'Images API (/v1/images)', value: 'images' },
-                      { label: 'Responses API (/v1/responses)', value: 'responses' },
-                    ]}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
-                  />
-                  <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                    {t('settings.api.apiModeHint')}
-                  </div>
-                </div>
+              {/* 6. Responses API 分组选择器（OAuth 登录时显示） */}
+              {activeProfile.provider === 'openai' && sakrylleLoggedIn && (
+                <ResponsesGroupSelector />
               )}
 
               {/* 7. 模型 ID（紧跟接口选择） */}
@@ -1272,13 +1309,11 @@ export default function SettingsModal() {
                   onChange={(e) => updateActiveProfile({ model: e.target.value })}
                   onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
                   type="text"
-                  placeholder={getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
+                  placeholder={DEFAULT_IMAGES_MODEL}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  {(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses'
-                    ? t('settings.api.modelHintResponses', { model: DEFAULT_RESPONSES_MODEL })
-                    : t('settings.api.modelHintImages', { model: DEFAULT_IMAGES_MODEL })}
+                  {t('settings.api.modelHintImages', { model: DEFAULT_IMAGES_MODEL })}
                   {activeProfile.provider === 'openai' && (
                     <> {t('settings.api.modelHintQuery')}</>
                   )}
@@ -1327,8 +1362,8 @@ export default function SettingsModal() {
                 </div>
               )}
 
-              {/* 8.5. Agent 模式图像生成 Profile（仅 Responses API 显示） */}
-              {activeProfile.provider === 'openai' && activeProfile.apiMode === 'responses' && (
+              {/* 8.5. Agent 模式图像生成 Profile */}
+              {activeProfile.provider === 'openai' && (
                 <label className="block">
                   <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
                     {t('settings.api.imageProfileId')}
@@ -1339,7 +1374,7 @@ export default function SettingsModal() {
                     options={[
                       { label: t('settings.api.imageProfileIdNone'), value: '' },
                       ...settings.profiles
-                        .filter(p => p.id !== activeProfile.id && p.provider === 'openai' && p.apiMode === 'images')
+                        .filter(p => p.id !== activeProfile.id && p.provider === 'openai')
                         .map(p => ({ label: p.name, value: p.id }))
                     ]}
                     className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"

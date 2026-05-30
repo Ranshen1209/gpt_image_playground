@@ -858,6 +858,7 @@ interface AppState {
       action: (checkboxChecked?: boolean) => void
     }>
     icon?: 'info' | 'copy'
+    buttonsScrollable?: boolean
     minConfirmDelayMs?: number
     messageAlign?: 'left' | 'center'
     tone?: 'danger' | 'warning'
@@ -1113,10 +1114,8 @@ export const useStore = create<AppState>()(
         const settings = normalizeSettings(state.settings)
         const activeProfile = getActiveApiProfile(settings)
 
-        // Check if profile supports Responses API (either via apiMode or OAuth token scope)
         const supportsResponsesApi = activeProfile.provider === 'openai' && (
-          activeProfile.apiMode === 'responses' ||
-          canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' })
+          canUseOAuthForProfile(activeProfile) || activeProfile.apiKey.trim() !== ''
         )
 
         if (supportsResponsesApi) {
@@ -1146,7 +1145,8 @@ export const useStore = create<AppState>()(
               icon: 'info',
               showCancel: true,
               cancelText: i18n.t('common.cancel'),
-              buttons: groups.slice(0, 4).map((group) => ({
+              buttonsScrollable: groups.length > 4,
+              buttons: groups.map((group) => ({
                 label: group.name,
                 tone: 'primary' as const,
                 action: async () => {
@@ -2961,10 +2961,9 @@ export async function submitAgentMessage() {
   const normalizedSettings = normalizeSettings(settings)
   const activeProfile = getActiveApiProfile(normalizedSettings)
 
-  // Check if profile supports Responses API (either via apiMode or OAuth token scope)
+  // Check if profile supports Responses API (OAuth or explicit API key)
   const supportsResponsesApi = activeProfile.provider === 'openai' && (
-    activeProfile.apiMode === 'responses' ||
-    canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' })
+    canUseOAuthForProfile(activeProfile) || activeProfile.apiKey.trim() !== ''
   )
 
   if (!supportsResponsesApi) {
@@ -2972,7 +2971,7 @@ export async function submitAgentMessage() {
     return
   }
 
-  const agentValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' }) }
+  const agentValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile(activeProfile) }
   if (validateApiProfile(activeProfile, agentValidationOptions)) {
     showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile, agentValidationOptions) }), 'error')
     state.setShowSettings(true)
@@ -3118,12 +3117,12 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   const normalizedSettings = normalizeSettings(settings)
   const activeProfile = getActiveApiProfile(normalizedSettings)
 
-  if (activeProfile.provider !== 'openai' || activeProfile.apiMode !== 'responses') {
+  if (activeProfile.provider !== 'openai') {
     state.setAppMode('agent')
     return
   }
 
-  const regenValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' }) }
+  const regenValidationOptions = { allowEmptyApiKey: canUseOAuthForProfile(activeProfile) }
   if (validateApiProfile(activeProfile, regenValidationOptions)) {
     showToast(i18n.t('errors.completeApiConfig', { detail: validateApiProfile(activeProfile, regenValidationOptions) }), 'error')
     state.setShowSettings(true)
