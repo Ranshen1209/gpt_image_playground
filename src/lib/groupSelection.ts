@@ -35,18 +35,28 @@ export function clearSelectedGroups(): void {
   }
 }
 
+function normalizeGroup(raw: any): SakrylleGroup | null {
+  if (!raw || typeof raw !== 'object') return null
+  const id = raw.id ?? raw.group_id
+  const name = raw.name ?? raw.group_name ?? raw.title ?? `Group ${id}`
+  if (!id) return null
+  return { id: Number(id), name: String(name) }
+}
+
 /** Get available groups from the stored OAuth token */
-export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
+export function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
   const token = getStoredToken()
-  if (!token) return []
+  if (!token) return Promise.resolve([])
   const groups: SakrylleGroup[] = []
-  if (token.group) groups.push(token.group)
+  const primary = normalizeGroup(token.group)
+  if (primary) groups.push(primary)
   if (token.additionalTokens) {
     for (const t of token.additionalTokens) {
-      if (t.group && !groups.some(g => g.id === t.group!.id)) {
-        groups.push(t.group)
+      const g = normalizeGroup(t.group)
+      if (g && !groups.some(existing => existing.id === g.id)) {
+        groups.push(g)
       }
     }
   }
-  return groups
+  return Promise.resolve(groups)
 }
