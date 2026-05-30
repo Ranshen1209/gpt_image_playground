@@ -19,7 +19,7 @@ vi.mock('./sakrylleAccount', () => {
   }
 })
 
-import { fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken, getSelectedGroupId, setSelectedGroup } from './groupSelection'
+import { ensureSelectedGroupId, fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken, getSelectedGroupId, getSelectedGroups, setSelectedGroup } from './groupSelection'
 import * as sakrylleAuth from './sakrylleAuth'
 import * as sakrylleAccount from './sakrylleAccount'
 
@@ -117,6 +117,21 @@ describe('fetchResponsesApiGroups', () => {
       { id: 11, name: 'GPT-Image-4K' },
     ])
   })
+
+  it('keeps capability metadata from /v1/me allowed_groups', async () => {
+    accountMock.__setMe({
+      allowed_groups: [
+        { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+        { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
+      ],
+    })
+
+    await expect(fetchResponsesApiGroups()).resolves.toEqual([
+      { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+      { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
+      { id: 7, name: 'Responses' },
+    ])
+  })
 })
 
 describe('getGroupAccessToken', () => {
@@ -152,5 +167,32 @@ describe('getSelectedGroupId', () => {
   it('falls back to the primary group when the stored group is stale', () => {
     setSelectedGroup('images', 999)
     expect(getSelectedGroupId('images')).toBe(5)
+  })
+})
+
+describe('ensureSelectedGroupId', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('chooses a mode-capable default from /v1/me before model fetching', async () => {
+    authMock.__setToken({
+      accessToken: 'sk_oauth_primary_group5',
+      refreshToken: 'rt_test',
+      expiresAt: Date.now() + 3_600_000,
+      group: { id: 5, name: 'GPT-Image' },
+      additionalTokens: [
+        { accessToken: 'sk_oauth_group9', expiresAt: Date.now() + 3_600_000, group: { id: 9, name: 'GPT-Pro' } },
+      ],
+    })
+    accountMock.__setMe({
+      allowed_groups: [
+        { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+        { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
+      ],
+    })
+
+    await expect(ensureSelectedGroupId('responses')).resolves.toBe(9)
+    expect(getSelectedGroups().responses).toBe(9)
   })
 })
