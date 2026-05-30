@@ -262,6 +262,32 @@ export async function fetchAllModels(): Promise<SakrylleModel[]> {
   }
 }
 
+// List models using a SPECIFIC group's access token, without rotating the
+// shared/primary token. Each group authorized in the OAuth grant has its own
+// access_token (primary token.group + additionalTokens[]). Querying /v1/models
+// with that token returns the models for that group — no refreshWithGroupId,
+// so two selectors (Images + Responses) never race on token rotation.
+export async function fetchModelsWithToken(accessToken: string): Promise<SakrylleModel[]> {
+  try {
+    const response = await fetch(buildUrl('models'), buildRequestInit(accessToken))
+    if (!response.ok) return []
+    const payload = await response.json() as ModelsPayload
+    return (payload.data ?? [])
+      .filter((item) => item?.id)
+      .map((item) => ({
+        id: item.id,
+        ownedBy: item.owned_by ?? 'sakrylle',
+        allowImageGeneration: item.allow_image_generation ?? false,
+        billingMode: item.billing_mode,
+        perRequestPriceUsd: item.per_request_price_usd,
+      }))
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'parse error'
+    console.warn('Sakrylle models (token-scoped) parse failed:', message)
+    return []
+  }
+}
+
 // Render a balance with the symbol Sakrylle returned for this user.
 // docs §3.1 — currency_display drives symbol; the numeric value is NOT FX-converted.
 export function formatBalance(amount: number, currency: 'CNY' | 'USD' = 'CNY'): string {
