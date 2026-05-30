@@ -120,6 +120,8 @@
       "responsesGroupDefault": "当前默认：{{name}}。",
       "responsesGroupLoading": "加载分组...",
       "responsesGroupNone": "未选择（使用默认）",
+      "imagesGroup": "Images API 分组",
+      "imagesGroupHint": "Gallery 模式图像生成使用的分组。",
       "modelId": "模型 ID",
       "modelIdImages": "模型 ID（Images API）",
       "modelIdResponses": "模型 ID（Responses API）",

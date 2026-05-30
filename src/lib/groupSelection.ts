@@ -5,6 +5,7 @@ const STORAGE_KEY = 'sakrylle-image-playground.selected-groups'
 
 export interface SelectedGroups {
   responses?: number
+  images?: number
 }
 
 export function getSelectedGroups(): SelectedGroups {
@@ -20,6 +21,7 @@ export function getSelectedGroups(): SelectedGroups {
 export function setSelectedGroup(apiMode: 'images' | 'responses', groupId: number): void {
   const current = getSelectedGroups()
   if (apiMode === 'responses') current.responses = groupId
+  if (apiMode === 'images') current.images = groupId
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
   } catch {

@@ -113,11 +113,11 @@ function getImportedProfileFromMergedSettings(
   return nextSettings.profiles.find((profile) => !previousProfileIds.has(profile.id)) ?? nextSettings.profiles[0]
 }
 
-function ResponsesGroupSelector() {
+function GroupSelector({ mode, label, hint }: { mode: 'images' | 'responses'; label: string; hint: string }) {
   const { t } = useTranslation()
   const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([])
   const [loading, setLoading] = useState(true)
-  const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(() => getSelectedGroups().responses)
+  const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(() => getSelectedGroups()[mode])
 
   useEffect(() => {
     let cancelled = false
@@ -139,7 +139,7 @@ function ResponsesGroupSelector() {
     const groupId = Number(value)
     if (!groupId) return
     setSelectedGroupId(groupId)
-    setSelectedGroup('responses', groupId)
+    setSelectedGroup(mode, groupId)
     await refreshWithGroupId(groupId)
   }
 
@@ -148,7 +148,7 @@ function ResponsesGroupSelector() {
   return (
     <div className="block">
       <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
-        {t('settings.api.responsesGroup')}
+        {label}
       </span>
       {loading ? (
         <div className="text-sm text-gray-400 dark:text-gray-500 py-2">
@@ -163,7 +163,7 @@ function ResponsesGroupSelector() {
         />
       )}
       <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-        {t('settings.api.responsesGroupHint')}{primaryGroup ? ` ${t('settings.api.responsesGroupDefault', { name: primaryGroup.name })}` : ''}
+        {hint}{primaryGroup ? ` ${t('settings.api.responsesGroupDefault', { name: (primaryGroup as any).name ?? (primaryGroup as any).group_name ?? `Group ${(primaryGroup as any).id ?? (primaryGroup as any).group_id}` })}` : ''}
       </div>
     </div>
   )
@@ -1347,9 +1347,12 @@ export default function SettingsModal() {
               </div>
               )}
 
-              {/* 6. Responses API 分组选择器（OAuth 登录时显示） */}
+              {/* 6. 分组选择器（OAuth 登录时显示） */}
               {activeProfile.provider === 'openai' && sakrylleLoggedIn && (
-                <ResponsesGroupSelector />
+                <>
+                  <GroupSelector mode="images" label={t('settings.api.imagesGroup')} hint={t('settings.api.imagesGroupHint')} />
+                  <GroupSelector mode="responses" label={t('settings.api.responsesGroup')} hint={t('settings.api.responsesGroupHint')} />
+                </>
               )}
 
               {/* 7. 模型 ID（Images API） */}

@@ -120,6 +120,8 @@
       "responsesGroupDefault": "Current default: {{name}}.",
       "responsesGroupLoading": "Loading groups...",
       "responsesGroupNone": "Not selected (use default)",
+      "imagesGroup": "Images API Group",
+      "imagesGroupHint": "Group used for image generation in Gallery mode.",
       "modelId": "Model ID",
       "modelIdImages": "Model ID (Images API)",
       "modelIdResponses": "Model ID (Responses API)",
