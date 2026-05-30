@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sakrylle-image-playground-v0.8.12'
+const CACHE_NAME = 'sakrylle-image-playground-v0.8.13'
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.png']
 
 self.addEventListener('install', (event) => {
