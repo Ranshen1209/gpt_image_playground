@@ -143,6 +143,8 @@ function ResponsesGroupSelector() {
     await refreshWithGroupId(groupId)
   }
 
+  const primaryGroup = sakrylleGetStoredToken()?.group
+
   return (
     <div className="block">
       <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
@@ -156,15 +158,12 @@ function ResponsesGroupSelector() {
         <Select
           value={selectedGroupId ?? ''}
           onChange={handleChange}
-          options={[
-            { label: t('settings.api.responsesGroupNone'), value: '' },
-            ...groups.map((g) => ({ label: g.name, value: g.id })),
-          ]}
+          options={groups.map((g) => ({ label: g.name, value: g.id }))}
           className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
         />
       )}
       <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-        {t('settings.api.responsesGroupHint')}
+        {t('settings.api.responsesGroupHint')}{primaryGroup ? ` ${t('settings.api.responsesGroupDefault', { name: primaryGroup.name })}` : ''}
       </div>
     </div>
   )
@@ -188,7 +187,7 @@ function ModelSelector({ value, onChange, filterImage, placeholder }: {
         if (cancelled) return
         const filtered = filterImage
           ? result.filter(m => m.allowImageGeneration)
-          : result.filter(m => !m.allowImageGeneration)
+          : result
         setModels(filtered)
         setLoading(false)
       })
