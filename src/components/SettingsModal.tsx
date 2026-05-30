@@ -21,7 +21,7 @@ import {
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout, refreshWithGroupId } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
-import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken } from '../lib/groupSelection'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken } from '../lib/groupSelection'
 import { fetchAllModels, fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
@@ -126,6 +126,8 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
       .then((result) => {
         if (cancelled) return
         setGroups(result)
+        const resolvedGroupId = getSelectedGroupId(mode)
+        if (resolvedGroupId) setSelectedGroupId(resolvedGroupId)
         setLoading(false)
       })
       .catch(() => {
@@ -180,29 +182,51 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
   const [models, setModels] = useState<SakrylleModel[]>([])
   const [loading, setLoading] = useState(true)
   const loggedIn = Boolean(sakrylleGetStoredToken())
+  const latestValueRef = useRef(value)
+  const latestOnChangeRef = useRef(onChange)
+
+  useEffect(() => {
+    latestValueRef.current = value
+    latestOnChangeRef.current = onChange
+  }, [value, onChange])
 
   useEffect(() => {
     if (!loggedIn) { setLoading(false); return }
     let cancelled = false
-    // Resolve which group this selector lists models for: the previously
-    // chosen group for this mode, else the first available group.
-    let groupId = getSelectedGroups()[mode]
-    if (!groupId) {
-      const first = getAvailableGroups()[0]
-      if (first) { groupId = first.id; setSelectedGroup(mode, first.id) }
-    }
+    setLoading(true)
+    setModels([])
+    // Resolve which group this selector lists models for: the persisted
+    // choice for this mode when still valid, else the current token's default group.
+    const groupId = getSelectedGroupId(mode)
     // Query /v1/models with THAT group's own access token — no token rotation,
     // so Images + Responses selectors never race on refreshWithGroupId.
     const accessToken = getGroupAccessToken(groupId)
     const fetcher = accessToken ? fetchModelsWithToken(accessToken) : fetchAllModels()
     fetcher.then((result) => {
       if (cancelled) return
-      const filtered = filterImage
+      const seenModelIds = new Set<string>()
+      const filtered = (filterImage
         ? result.filter(m => m.allowImageGeneration)
-        : result.filter(m => !m.allowImageGeneration)
+        : result.filter(m => !m.allowImageGeneration))
+        .filter((model) => {
+          if (seenModelIds.has(model.id)) return false
+          seenModelIds.add(model.id)
+          return true
+        })
       setModels(filtered)
+      const currentValue = latestValueRef.current.trim()
+      const currentModelStillAvailable = filtered.some((model) => model.id === currentValue)
+      const nextModel = filtered[0]?.id
+      if (nextModel && (!currentValue || !currentModelStillAvailable)) {
+        latestOnChangeRef.current(nextModel)
+      }
       setLoading(false)
-    }).catch(() => { if (!cancelled) setLoading(false) })
+    }).catch(() => {
+      if (!cancelled) {
+        setModels([])
+        setLoading(false)
+      }
+    })
     return () => { cancelled = true }
   }, [loggedIn, filterImage, mode])
 
@@ -218,14 +242,23 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
     )
   }
 
+  if (!models.length) {
+    return (
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        type="text"
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+      />
+    )
+  }
+
   return (
     <Select
       value={value || ''}
       onChange={(v) => onChange(String(v))}
-      options={[
-        { label: placeholder, value: '' },
-        ...models.map(m => ({ label: m.id, value: m.id })),
-      ]}
+      options={models.map(m => ({ label: m.id, value: m.id }))}
       className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
     />
   )

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { canUseOAuthForProfile, resolveBearerToken } from './oauthFallback'
 import type { ApiProfile } from '../types'
 import * as sakrylleAuth from './sakrylleAuth'
@@ -30,9 +30,26 @@ function createProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
   }
 }
 
+function createMockStorage(): Storage {
+  const map = new Map<string, string>()
+  return {
+    get length() { return map.size },
+    clear: () => map.clear(),
+    getItem: (key: string) => map.get(key) ?? null,
+    key: (index: number) => Array.from(map.keys())[index] ?? null,
+    removeItem: (key: string) => { map.delete(key) },
+    setItem: (key: string, value: string) => { map.set(key, String(value)) },
+  }
+}
+
 describe('oauthFallback', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   describe('canUseOAuthForProfile', () => {
@@ -235,6 +252,32 @@ describe('oauthFallback', () => {
       })
       const token = await resolveBearerToken(profile)
       expect(token).toBe('sk_oauth_images')
+    })
+
+    it('returns the token for the selected API-mode group', async () => {
+      vi.stubGlobal('localStorage', createMockStorage())
+      localStorage.setItem('sakrylle-image-playground.selected-groups', JSON.stringify({ images: 9 }))
+      const profile = createProfile({ apiMode: 'images' })
+      const oauthToken = {
+        accessToken: 'sk_oauth_group5',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+        group: { id: 5, name: 'GPT-Image' },
+        additionalTokens: [
+          {
+            accessToken: 'sk_oauth_group9_4k',
+            expiresAt: Date.now() + 3600000,
+            scope: 'images:create',
+            group: { id: 9, name: 'GPT-Image-4K' },
+          },
+        ],
+      }
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue(oauthToken)
+      vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue(oauthToken)
+
+      const token = await resolveBearerToken(profile)
+
+      expect(token).toBe('sk_oauth_group9_4k')
     })
   })
 })

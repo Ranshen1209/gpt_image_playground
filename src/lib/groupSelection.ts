@@ -63,6 +63,18 @@ export function getAvailableGroups(): SakrylleGroup[] {
   return groups
 }
 
+export function getSelectedGroupId(apiMode: 'images' | 'responses'): number | undefined {
+  const groups = getAvailableGroups()
+  if (!groups.length) return undefined
+
+  const selected = getSelectedGroups()[apiMode]
+  if (selected && groups.some((group) => group.id === selected)) return selected
+
+  const fallback = groups[0]?.id
+  if (fallback) setSelectedGroup(apiMode, fallback)
+  return fallback
+}
+
 /** Get available groups from the stored OAuth token */
 export function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
   return Promise.resolve(getAvailableGroups())
