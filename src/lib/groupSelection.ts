@@ -1,7 +1,8 @@
-import type { SakrylleGroup } from './sakrylleAccount'
+import { fetchMe, type SakrylleGroup } from './sakrylleAccount'
 import { getStoredToken } from './sakrylleAuth'
 
 const STORAGE_KEY = 'sakrylle-image-playground.selected-groups'
+const GROUP_NAMES_STORAGE_KEY = 'sakrylle-image-playground.group-names'
 
 export interface SelectedGroups {
   responses?: number
@@ -37,12 +38,72 @@ export function clearSelectedGroups(): void {
   }
 }
 
+function readCachedGroupNames(): Record<string, string> {
+  try {
+    const stored = localStorage.getItem(GROUP_NAMES_STORAGE_KEY)
+    if (!stored) return {}
+    const parsed = JSON.parse(stored) as Record<string, unknown>
+    const names: Record<string, string> = {}
+    for (const [id, name] of Object.entries(parsed)) {
+      if (typeof name === 'string' && name.trim()) names[id] = name.trim()
+    }
+    return names
+  } catch {
+    return {}
+  }
+}
+
+function isFallbackGroupName(id: number, name: string): boolean {
+  return name.trim() === `Group ${id}`
+}
+
+function cacheGroupNames(groups: SakrylleGroup[]): void {
+  try {
+    const current = readCachedGroupNames()
+    let changed = false
+    for (const group of groups) {
+      const name = group.name.trim()
+      if (!name || isFallbackGroupName(group.id, name)) continue
+      if (current[String(group.id)] === name) continue
+      current[String(group.id)] = name
+      changed = true
+    }
+    if (changed) localStorage.setItem(GROUP_NAMES_STORAGE_KEY, JSON.stringify(current))
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function normalizeGroup(raw: any): SakrylleGroup | null {
   if (!raw || typeof raw !== 'object') return null
   const id = raw.id || raw.group_id
-  const name = raw.name || raw.group_name || raw.title || `Group ${id}`
   if (!id) return null
-  return { id: Number(id), name: String(name) }
+  const normalizedId = Number(id)
+  if (!Number.isFinite(normalizedId)) return null
+  const cachedName = readCachedGroupNames()[String(normalizedId)]
+  const rawName = typeof raw.name === 'string' && raw.name.trim()
+    ? raw.name.trim()
+    : typeof raw.group_name === 'string' && raw.group_name.trim()
+      ? raw.group_name.trim()
+      : typeof raw.title === 'string' && raw.title.trim()
+        ? raw.title.trim()
+        : ''
+  return { id: normalizedId, name: rawName || cachedName || `Group ${normalizedId}` }
+}
+
+function mergeGroups(primary: SakrylleGroup[], secondary: SakrylleGroup[]): SakrylleGroup[] {
+  const merged = new Map<number, SakrylleGroup>()
+  for (const group of [...primary, ...secondary]) {
+    const existing = merged.get(group.id)
+    if (!existing) {
+      merged.set(group.id, group)
+      continue
+    }
+    if (isFallbackGroupName(group.id, existing.name) && !isFallbackGroupName(group.id, group.name)) {
+      merged.set(group.id, group)
+    }
+  }
+  return Array.from(merged.values())
 }
 
 /** Get available groups from the stored OAuth token (synchronous). */
@@ -60,6 +121,7 @@ export function getAvailableGroups(): SakrylleGroup[] {
       }
     }
   }
+  cacheGroupNames(groups)
   return groups
 }
 
@@ -76,8 +138,19 @@ export function getSelectedGroupId(apiMode: 'images' | 'responses'): number | un
 }
 
 /** Get available groups from the stored OAuth token */
-export function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
-  return Promise.resolve(getAvailableGroups())
+export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
+  const tokenGroups = getAvailableGroups()
+  try {
+    const me = await fetchMe()
+    const accountGroups = Array.isArray(me?.allowed_groups)
+      ? me.allowed_groups.map((group) => normalizeGroup(group)).filter((group): group is SakrylleGroup => Boolean(group))
+      : []
+    const groups = accountGroups.length ? mergeGroups(accountGroups, tokenGroups) : tokenGroups
+    cacheGroupNames(groups)
+    return groups
+  } catch {
+    return tokenGroups
+  }
 }
 
 // Resolve the access token bound to a specific group, WITHOUT rotating the
