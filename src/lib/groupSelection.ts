@@ -96,6 +96,9 @@ function normalizeGroup(raw: any): SakrylleGroup | null {
   const capabilities = rawCapabilities
     .filter((capability: unknown): capability is string => typeof capability === 'string' && Boolean(capability.trim()))
     .map((capability: string) => capability.trim())
+  if ((raw.allow_image_generation === true || raw.allowImageGeneration === true) && !capabilities.includes('images:create')) {
+    capabilities.push('images:create')
+  }
   return {
     id: normalizedId,
     name: rawName || cachedName || `Group ${normalizedId}`,
@@ -118,7 +121,7 @@ function mergeGroups(primary: SakrylleGroup[], secondary: SakrylleGroup[]): Sakr
   return Array.from(merged.values())
 }
 
-function groupSupportsMode(group: SakrylleGroup, apiMode: 'images' | 'responses'): boolean {
+function groupSupportsModeByCapability(group: SakrylleGroup, apiMode: 'images' | 'responses'): boolean {
   const capabilities = group.capabilities ?? []
   if (!capabilities.length) return false
   if (apiMode === 'images') {
@@ -136,10 +139,53 @@ function groupSupportsMode(group: SakrylleGroup, apiMode: 'images' | 'responses'
   )
 }
 
+function normalizedGroupName(group: SakrylleGroup): string {
+  return group.name.trim().toLowerCase()
+}
+
+function groupNameLooksImage(group: SakrylleGroup): boolean {
+  const name = normalizedGroupName(group)
+  return name.includes('image') || name.includes('图像') || name.includes('绘图') || name.includes('画图')
+}
+
+function groupNameLooksResponses(group: SakrylleGroup): boolean {
+  const name = normalizedGroupName(group)
+  return name.includes('responses') ||
+    name.includes('response') ||
+    name.includes('plus') ||
+    name.includes('pro') ||
+    name.includes('chat') ||
+    name.includes('codex')
+}
+
+export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: SakrylleGroup[]): SakrylleGroup[] {
+  if (!groups.length) return []
+
+  if (apiMode === 'images') {
+    const namedImageGroups = groups.filter(groupNameLooksImage)
+    if (namedImageGroups.length) return namedImageGroups
+
+    const capabilityGroups = groups.filter((group) => groupSupportsModeByCapability(group, apiMode))
+    return capabilityGroups.length ? capabilityGroups : groups
+  }
+
+  const namedResponsesGroups = groups.filter(groupNameLooksResponses)
+  if (namedResponsesGroups.length) return namedResponsesGroups
+
+  const capabilityGroups = groups.filter((group) => groupSupportsModeByCapability(group, apiMode))
+  const nonImageCapabilityGroups = capabilityGroups.filter((group) => !groupNameLooksImage(group))
+  if (nonImageCapabilityGroups.length) return nonImageCapabilityGroups
+  if (capabilityGroups.length) return capabilityGroups
+
+  const nonImageGroups = groups.filter((group) => !groupNameLooksImage(group))
+  return nonImageGroups.length ? nonImageGroups : groups
+}
+
 export function resolveSelectedGroupId(apiMode: 'images' | 'responses', groups: SakrylleGroup[]): number | undefined {
   const selected = getSelectedGroups()[apiMode]
-  if (selected && groups.some((group) => group.id === selected)) return selected
-  return groups.find((group) => groupSupportsMode(group, apiMode))?.id ?? groups[0]?.id
+  const candidates = getGroupsForApiMode(apiMode, groups)
+  if (selected && candidates.some((group) => group.id === selected)) return selected
+  return candidates[0]?.id ?? groups[0]?.id
 }
 
 /** Get available groups from the stored OAuth token (synchronous). */
@@ -189,7 +235,8 @@ export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
 export async function ensureSelectedGroupId(apiMode: 'images' | 'responses'): Promise<number | undefined> {
   const tokenGroups = getAvailableGroups()
   const selected = getSelectedGroups()[apiMode]
-  if (selected && tokenGroups.some((group) => group.id === selected)) return selected
+  const tokenCandidates = getGroupsForApiMode(apiMode, tokenGroups)
+  if (selected && tokenCandidates.some((group) => group.id === selected)) return selected
 
   const groups = await fetchResponsesApiGroups()
   const resolvedGroupId = resolveSelectedGroupId(apiMode, groups.length ? groups : tokenGroups)
