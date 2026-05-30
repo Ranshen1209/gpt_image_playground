@@ -187,7 +187,7 @@ function ModelSelector({ value, onChange, filterImage, placeholder }: {
         if (cancelled) return
         const filtered = filterImage
           ? result.filter(m => m.allowImageGeneration)
-          : result
+          : result.filter(m => !m.allowImageGeneration)
         setModels(filtered)
         setLoading(false)
       })
