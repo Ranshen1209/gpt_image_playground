@@ -22,6 +22,7 @@ import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboar
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout, refreshWithGroupId } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
 import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups } from '../lib/groupSelection'
+import { fetchAllModels, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -166,6 +167,57 @@ function ResponsesGroupSelector() {
         {t('settings.api.responsesGroupHint')}
       </div>
     </div>
+  )
+}
+
+function ModelSelector({ value, onChange, filterImage, placeholder }: {
+  value: string
+  onChange: (value: string) => void
+  filterImage: boolean
+  placeholder: string
+}) {
+  const [models, setModels] = useState<SakrylleModel[]>([])
+  const [loading, setLoading] = useState(true)
+  const loggedIn = Boolean(sakrylleGetStoredToken())
+
+  useEffect(() => {
+    if (!loggedIn) { setLoading(false); return }
+    let cancelled = false
+    fetchAllModels()
+      .then((result) => {
+        if (cancelled) return
+        const filtered = filterImage
+          ? result.filter(m => m.allowImageGeneration)
+          : result.filter(m => !m.allowImageGeneration)
+        setModels(filtered)
+        setLoading(false)
+      })
+      .catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [loggedIn, filterImage])
+
+  if (!loggedIn || loading) {
+    return (
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        type="text"
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+      />
+    )
+  }
+
+  return (
+    <Select
+      value={value || ''}
+      onChange={(v) => onChange(String(v))}
+      options={[
+        { label: placeholder, value: '' },
+        ...models.map(m => ({ label: m.id, value: m.id })),
+      ]}
+      className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+    />
   )
 }
 
@@ -1306,13 +1358,11 @@ export default function SettingsModal() {
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
                   {t('settings.api.modelIdImages')}
                 </span>
-                <input
+                <ModelSelector
                   value={activeProfile.model}
-                  onChange={(e) => updateActiveProfile({ model: e.target.value })}
-                  onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
-                  type="text"
+                  onChange={(v) => { updateActiveProfile({ model: v }); commitActiveProfilePatch({ model: v }) }}
+                  filterImage={true}
                   placeholder={DEFAULT_IMAGES_MODEL}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
                   {t('settings.api.modelHintImages', { model: DEFAULT_IMAGES_MODEL })}
@@ -1325,13 +1375,11 @@ export default function SettingsModal() {
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
                   {t('settings.api.modelIdResponses')}
                 </span>
-                <input
+                <ModelSelector
                   value={activeProfile.responsesModel ?? ''}
-                  onChange={(e) => updateActiveProfile({ responsesModel: e.target.value })}
-                  onBlur={(e) => commitActiveProfilePatch({ responsesModel: e.target.value })}
-                  type="text"
+                  onChange={(v) => { updateActiveProfile({ responsesModel: v }); commitActiveProfilePatch({ responsesModel: v }) }}
+                  filterImage={false}
                   placeholder={DEFAULT_RESPONSES_MODEL}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
                   {t('settings.api.modelHintResponses', { model: DEFAULT_RESPONSES_MODEL })}

@@ -1,4 +1,5 @@
 import type { SakrylleGroup } from './sakrylleAccount'
+import { getStoredToken } from './sakrylleAuth'
 
 const STORAGE_KEY = 'sakrylle-image-playground.selected-groups'
 
@@ -34,10 +35,18 @@ export function clearSelectedGroups(): void {
   }
 }
 
-/** Fetch allowed groups from /v1/me */
+/** Get available groups from the stored OAuth token */
 export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
-  const { fetchMe } = await import('./sakrylleAccount')
-  const me = await fetchMe()
-  if (!me?.allowed_groups?.length) return []
-  return me.allowed_groups
+  const token = getStoredToken()
+  if (!token) return []
+  const groups: SakrylleGroup[] = []
+  if (token.group) groups.push(token.group)
+  if (token.additionalTokens) {
+    for (const t of token.additionalTokens) {
+      if (t.group && !groups.some(g => g.id === t.group!.id)) {
+        groups.push(t.group)
+      }
+    }
+  }
+  return groups
 }

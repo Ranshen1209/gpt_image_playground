@@ -241,6 +241,27 @@ export async function fetchModels(): Promise<SakrylleModel[]> {
   }
 }
 
+export async function fetchAllModels(): Promise<SakrylleModel[]> {
+  const response = await authedFetch('models')
+  if (!response || !response.ok) return []
+  try {
+    const payload = await response.json() as ModelsPayload
+    return (payload.data ?? [])
+      .filter((item) => item?.id)
+      .map((item) => ({
+        id: item.id,
+        ownedBy: item.owned_by ?? 'sakrylle',
+        allowImageGeneration: item.allow_image_generation ?? false,
+        billingMode: item.billing_mode,
+        perRequestPriceUsd: item.per_request_price_usd,
+      }))
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'parse error'
+    console.warn('Sakrylle models parse failed:', message)
+    return []
+  }
+}
+
 // Render a balance with the symbol Sakrylle returned for this user.
 // docs §3.1 — currency_display drives symbol; the numeric value is NOT FX-converted.
 export function formatBalance(amount: number, currency: 'CNY' | 'USD' = 'CNY'): string {
