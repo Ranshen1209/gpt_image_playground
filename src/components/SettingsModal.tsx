@@ -113,7 +113,7 @@ function getImportedProfileFromMergedSettings(
   return nextSettings.profiles.find((profile) => !previousProfileIds.has(profile.id)) ?? nextSettings.profiles[0]
 }
 
-function GroupSelector({ mode, label, hint }: { mode: 'images' | 'responses'; label: string; hint: string }) {
+function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 'responses'; label: string; hint: string; onGroupChange?: () => void }) {
   const { t } = useTranslation()
   const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([])
   const [loading, setLoading] = useState(true)
@@ -141,6 +141,7 @@ function GroupSelector({ mode, label, hint }: { mode: 'images' | 'responses'; la
     setSelectedGroupId(groupId)
     setSelectedGroup(mode, groupId)
     await refreshWithGroupId(groupId)
+    onGroupChange?.()
   }
 
   const primaryGroup = sakrylleGetStoredToken()?.group
@@ -244,6 +245,7 @@ export default function SettingsModal() {
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [agentMaxToolRoundsInput, setAgentMaxToolRoundsInput] = useState(String(settings.agentMaxToolRounds))
   const [showApiKey, setShowApiKey] = useState(false)
+  const [modelRefreshKey, setModelRefreshKey] = useState(0)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [profileMenuMaxHeight, setProfileMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [profileImportUrlTooltipVisible, setProfileImportUrlTooltipVisible] = useState(false)
@@ -1350,8 +1352,8 @@ export default function SettingsModal() {
               {/* 6. 分组选择器（OAuth 登录时显示） */}
               {activeProfile.provider === 'openai' && sakrylleLoggedIn && (
                 <>
-                  <GroupSelector mode="images" label={t('settings.api.imagesGroup')} hint={t('settings.api.imagesGroupHint')} />
-                  <GroupSelector mode="responses" label={t('settings.api.responsesGroup')} hint={t('settings.api.responsesGroupHint')} />
+                  <GroupSelector mode="images" label={t('settings.api.imagesGroup')} hint={t('settings.api.imagesGroupHint')} onGroupChange={() => setModelRefreshKey(k => k + 1)} />
+                  <GroupSelector mode="responses" label={t('settings.api.responsesGroup')} hint={t('settings.api.responsesGroupHint')} onGroupChange={() => setModelRefreshKey(k => k + 1)} />
                 </>
               )}
 
@@ -1361,6 +1363,7 @@ export default function SettingsModal() {
                   {t('settings.api.modelIdImages')}
                 </span>
                 <ModelSelector
+                  key={`img-${modelRefreshKey}`}
                   value={activeProfile.model}
                   onChange={(v) => { updateActiveProfile({ model: v }); commitActiveProfilePatch({ model: v }) }}
                   filterImage={true}
@@ -1378,6 +1381,7 @@ export default function SettingsModal() {
                   {t('settings.api.modelIdResponses')}
                 </span>
                 <ModelSelector
+                  key={`resp-${modelRefreshKey}`}
                   value={activeProfile.responsesModel ?? ''}
                   onChange={(v) => { updateActiveProfile({ responsesModel: v }); commitActiveProfilePatch({ responsesModel: v }) }}
                   filterImage={false}
