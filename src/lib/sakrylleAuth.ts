@@ -131,6 +131,44 @@ function normalizeTokenGroup(
   }
 }
 
+function mergeAdditionalTokens(
+  payloadTokens: OAuthTokenResponse['additional_tokens'],
+  previousToken: SakrylleAuthToken | undefined,
+  previousGroups: Map<number, { id: number; name: string }>,
+  nextPrimaryGroup: { id: number; name: string } | undefined,
+): SakrylleAuthToken['additionalTokens'] {
+  const merged: NonNullable<SakrylleAuthToken['additionalTokens']> = []
+  const seenGroupIds = new Set<number>()
+  const now = Date.now()
+
+  const addToken = (token: NonNullable<SakrylleAuthToken['additionalTokens']>[number]) => {
+    const groupId = parseGroupId(token.group)
+    if (!groupId || groupId === nextPrimaryGroup?.id || seenGroupIds.has(groupId)) return
+    if (token.expiresAt <= now) return
+    seenGroupIds.add(groupId)
+    merged.push(token)
+  }
+
+  payloadTokens?.forEach((token) => addToken({
+    accessToken: token.access_token,
+    expiresAt: Date.now() + (token.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
+    scope: token.scope,
+    group: normalizeTokenGroup(token.group, previousGroups),
+  }))
+
+  if (previousToken?.group) {
+    addToken({
+      accessToken: previousToken.accessToken,
+      expiresAt: previousToken.expiresAt,
+      scope: previousToken.scope,
+      group: previousToken.group,
+    })
+  }
+  previousToken?.additionalTokens?.forEach(addToken)
+
+  return merged.length ? merged : undefined
+}
+
 function tokenFromPayload(
   payload: OAuthTokenResponse,
   opts: {
@@ -164,12 +202,12 @@ function tokenFromPayload(
   const normalizedGroup = normalizeTokenGroup(payload.group, previousGroups)
     ?? (opts.requestedGroupId ? previousGroups.get(opts.requestedGroupId) : undefined)
     ?? (payload.group ? undefined : opts.previousToken?.group)
-  const normalizedAdditionalTokens = payload.additional_tokens?.map((t) => ({
-    accessToken: t.access_token,
-    expiresAt: Date.now() + (t.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000,
-    scope: t.scope,
-    group: normalizeTokenGroup(t.group, previousGroups),
-  }))
+  const normalizedAdditionalTokens = mergeAdditionalTokens(
+    payload.additional_tokens,
+    opts.previousToken,
+    previousGroups,
+    normalizedGroup,
+  )
 
   return {
     accessToken: payload.access_token,

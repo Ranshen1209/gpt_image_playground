@@ -19,7 +19,7 @@ vi.mock('./sakrylleAccount', () => {
   }
 })
 
-import { ensureSelectedGroupId, fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken, getSelectedGroupId, getSelectedGroups, setSelectedGroup } from './groupSelection'
+import { ensureSelectedGroupId, fetchResponsesApiGroups, getAvailableGroups, getGroupAccessToken, getGroupsForApiMode, getSelectedGroupId, getSelectedGroups, resolveSelectedGroupId, setSelectedGroup } from './groupSelection'
 import * as sakrylleAuth from './sakrylleAuth'
 import * as sakrylleAccount from './sakrylleAccount'
 
@@ -134,6 +134,31 @@ describe('fetchResponsesApiGroups', () => {
   })
 })
 
+describe('getGroupsForApiMode', () => {
+  it('infers Sakrylle Images and Responses groups from names when capabilities are absent', () => {
+    const groups = [
+      { id: 5, name: 'GPT-Image' },
+      { id: 9, name: 'GPT-Plus' },
+    ]
+
+    expect(getGroupsForApiMode('images', groups)).toEqual([{ id: 5, name: 'GPT-Image' }])
+    expect(getGroupsForApiMode('responses', groups)).toEqual([{ id: 9, name: 'GPT-Plus' }])
+  })
+
+  it('migrates stale stored selections to a mode-appropriate group', () => {
+    const groups = [
+      { id: 5, name: 'GPT-Image' },
+      { id: 9, name: 'GPT-Plus' },
+    ]
+
+    setSelectedGroup('images', 9)
+    setSelectedGroup('responses', 5)
+
+    expect(resolveSelectedGroupId('images', groups)).toBe(5)
+    expect(resolveSelectedGroupId('responses', groups)).toBe(9)
+  })
+})
+
 describe('getGroupAccessToken', () => {
   it('returns each group its OWN access token (no rotation)', () => {
     expect(getGroupAccessToken(5)).toBe('sk_oauth_primary_group5')
@@ -160,8 +185,17 @@ describe('getSelectedGroupId', () => {
   })
 
   it('keeps the stored group when it is still available', () => {
-    setSelectedGroup('images', 7)
-    expect(getSelectedGroupId('images')).toBe(7)
+    authMock.__setToken({
+      accessToken: 'sk_oauth_primary_group5',
+      refreshToken: 'rt_test',
+      expiresAt: Date.now() + 3_600_000,
+      group: { id: 5, name: 'GPT-Image' },
+      additionalTokens: [
+        { accessToken: 'sk_oauth_group9', expiresAt: Date.now() + 3_600_000, group: { id: 9, name: 'GPT-Image-4K' } },
+      ],
+    })
+    setSelectedGroup('images', 9)
+    expect(getSelectedGroupId('images')).toBe(9)
   })
 
   it('falls back to the primary group when the stored group is stale', () => {

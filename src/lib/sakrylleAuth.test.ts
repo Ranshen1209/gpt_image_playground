@@ -292,6 +292,34 @@ describe('refreshIfNeeded', () => {
     expect(token?.additionalTokens?.[0].group).toEqual({ id: 11, name: 'GPT-Image-4K' })
   })
 
+  it('preserves previous additional group tokens when the refresh payload omits them', async () => {
+    seedToken({
+      accessToken: 'old-5',
+      refreshToken: 'rt-old',
+      expiresAt: Date.now() + 1000,
+      scope: 'images:create responses:create',
+      group: { id: 5, name: 'GPT-Image' },
+      additionalTokens: [
+        { accessToken: 'old-9', expiresAt: Date.now() + 60_000, group: { id: 9, name: 'GPT-Plus' } },
+      ],
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'new-5',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+        group: { id: 5 },
+      }),
+    )
+
+    const token = await refreshIfNeeded()
+
+    expect(token?.group).toEqual({ id: 5, name: 'GPT-Image' })
+    expect(token?.additionalTokens).toEqual([
+      expect.objectContaining({ accessToken: 'old-9', group: { id: 9, name: 'GPT-Plus' } }),
+    ])
+  })
+
   it('preserves refreshTokenExpiresAt across rotations (family-anchored expiry)', async () => {
     const familyExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
     seedToken({
@@ -433,6 +461,9 @@ describe('refreshWithGroupId', () => {
     const token = await refreshWithGroupId(11)
 
     expect(token?.group).toEqual({ id: 11, name: 'GPT-Image-4K' })
+    expect(token?.additionalTokens).toEqual([
+      expect.objectContaining({ accessToken: 'old-5', group: { id: 5, name: 'GPT-Image' } }),
+    ])
     const body = new URLSearchParams(fetchMock.mock.calls[0][1]?.body as string)
     expect(body.get('group_id')).toBe('11')
   })

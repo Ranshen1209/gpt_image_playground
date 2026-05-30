@@ -281,6 +281,21 @@ describe('default profile', () => {
     expect(getActiveApiProfile(settings).imageProfileId).toBe(imageProfile.id)
   })
 
+  it('preserves the Responses API model separately from the Images API model', () => {
+    const settings = normalizeSettings({
+      profiles: [
+        createDefaultOpenAIProfile({
+          model: DEFAULT_IMAGES_MODEL,
+          responsesModel: 'gpt-5.3-codex',
+        }),
+      ],
+    })
+
+    expect(settings.profiles[0].model).toBe(DEFAULT_IMAGES_MODEL)
+    expect(settings.profiles[0].responsesModel).toBe('gpt-5.3-codex')
+    expect(getActiveApiProfile(settings).responsesModel).toBe('gpt-5.3-codex')
+  })
+
   it('falls back to Sakrylle API URL when no override is set', () => {
     expect(createDefaultOpenAIProfile().baseUrl).toBe('https://api.sakrylle.com/v1')
     expect(DEFAULT_SETTINGS.baseUrl).toBe('https://api.sakrylle.com/v1')

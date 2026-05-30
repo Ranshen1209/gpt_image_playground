@@ -19,9 +19,9 @@ import {
   normalizeStreamPartialImages,
 } from '../lib/apiProfiles'
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
-import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout, refreshWithGroupId } from '../lib/sakrylleAuth'
+import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
-import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId } from '../lib/groupSelection'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId, getGroupsForApiMode } from '../lib/groupSelection'
 import { fetchAllModels, fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
@@ -126,12 +126,12 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
       .then((result) => {
         if (cancelled) return
         setGroups(result)
-        const selectedGroupId = getSelectedGroups()[mode]
+        const storedGroupId = getSelectedGroups()[mode]
         const resolvedGroupId = resolveSelectedGroupId(mode, result) ?? getSelectedGroupId(mode)
         if (resolvedGroupId) {
           setSelectedGroupId(resolvedGroupId)
-          if (selectedGroupId !== resolvedGroupId) setSelectedGroup(mode, resolvedGroupId)
-          if (selectedGroupId !== resolvedGroupId) onGroupChange?.()
+          if (storedGroupId !== resolvedGroupId) setSelectedGroup(mode, resolvedGroupId)
+          if (storedGroupId !== resolvedGroupId) onGroupChange?.()
         }
         setLoading(false)
       })
@@ -142,24 +142,17 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
     return () => { cancelled = true }
   }, [])
 
-  const handleChange = async (value: string | number) => {
+  const handleChange = (value: string | number) => {
     const groupId = Number(value)
     if (!groupId) return
     setSelectedGroupId(groupId)
     setSelectedGroup(mode, groupId)
-    await refreshWithGroupId(groupId)
     onGroupChange?.()
   }
 
-  const primaryGroup = sakrylleGetStoredToken()?.group
-  const primaryGroupId = primaryGroup ? Number((primaryGroup as any).id ?? (primaryGroup as any).group_id) : undefined
-  const primaryGroupName = primaryGroupId && Number.isFinite(primaryGroupId)
-    ? groups.find((group) => group.id === primaryGroupId)?.name
-      ?? (typeof (primaryGroup as any).name === 'string' && (primaryGroup as any).name.trim()
-        ? (primaryGroup as any).name.trim()
-        : typeof (primaryGroup as any).group_name === 'string' && (primaryGroup as any).group_name.trim()
-          ? (primaryGroup as any).group_name.trim()
-          : `Group ${primaryGroupId}`)
+  const selectableGroups = getGroupsForApiMode(mode, groups)
+  const selectedGroupName = selectedGroupId
+    ? groups.find((group) => group.id === selectedGroupId)?.name
     : ''
 
   return (
@@ -175,12 +168,12 @@ function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 
         <Select
           value={selectedGroupId ?? ''}
           onChange={handleChange}
-          options={groups.map((g) => ({ label: g.name, value: g.id }))}
+          options={selectableGroups.map((g) => ({ label: g.name, value: g.id }))}
           className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
         />
       )}
       <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-        {hint}{primaryGroupName ? ` ${t('settings.api.responsesGroupDefault', { name: primaryGroupName })}` : ''}
+        {hint}{selectedGroupName ? ` ${t('settings.api.responsesGroupDefault', { name: selectedGroupName })}` : ''}
       </div>
     </div>
   )

@@ -76,6 +76,9 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     baseUrl: rawBaseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
+    responsesModel: typeof record.responsesModel === 'string' && record.responsesModel.trim()
+      ? record.responsesModel.trim()
+      : defaults.responsesModel,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : defaults.timeout,
     apiMode,
     codexCli: Boolean(record.codexCli),
@@ -158,6 +161,9 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
     baseUrl: typeof record.baseUrl === 'string' && record.baseUrl.trim() ? record.baseUrl : profile.baseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
+    responsesModel: typeof record.responsesModel === 'string' && record.responsesModel.trim()
+      ? record.responsesModel.trim()
+      : profile.responsesModel,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : profile.timeout,
     apiMode: record.apiMode === 'images' || record.apiMode === 'responses' ? record.apiMode : profile.apiMode,
     codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,

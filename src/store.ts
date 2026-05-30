@@ -19,7 +19,7 @@ import type {
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, getActiveApiProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { canUseOAuthForProfile } from './lib/oauthFallback'
-import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups } from './lib/groupSelection'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getGroupsForApiMode } from './lib/groupSelection'
 
 import { dismissAllTooltips } from './lib/tooltipDismiss'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
@@ -1136,9 +1136,8 @@ export const useStore = create<AppState>()(
           void (async () => {
             const selectedGroups = getSelectedGroups()
             if (selectedGroups.responses) return
-            const groups = await fetchResponsesApiGroups()
+            const groups = getGroupsForApiMode('responses', await fetchResponsesApiGroups())
             if (groups.length <= 1) return
-            const { refreshWithGroupId } = await import('./lib/sakrylleAuth')
             useStore.getState().setConfirmDialog({
               title: i18n.t('agent.selectGroupTitle'),
               message: i18n.t('agent.selectGroupMessage', { count: groups.length }),
@@ -1149,9 +1148,8 @@ export const useStore = create<AppState>()(
               buttons: groups.map((group) => ({
                 label: group.name,
                 tone: 'primary' as const,
-                action: async () => {
+                action: () => {
                   setSelectedGroup('responses', group.id)
-                  await refreshWithGroupId(group.id)
                 },
               })),
             })
