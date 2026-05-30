@@ -1225,13 +1225,10 @@ export const useStore = create<AppState>()(
         const activeProfile = getActiveApiProfile(settings)
         const agentValidationError = getAgentProfileValidationError(settings)
 
-        // Check if profile supports Responses API (either via apiMode or OAuth token scope)
         const supportsResponsesApi = activeProfile.provider === 'openai' && (
-          activeProfile.apiMode === 'responses' ||
-          canUseOAuthForProfile({ ...activeProfile, apiMode: 'responses' })
+          canUseOAuthForProfile(activeProfile) || activeProfile.apiKey.trim() !== ''
         )
 
-        if (!agentValidationError || supportsResponsesApi) {
         if (!agentValidationError || supportsResponsesApi) {
           const galleryInputDraft = saveGalleryInputDraft(state)
           const savedAgentScrollTop = state.activeAgentConversationId

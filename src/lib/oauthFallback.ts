@@ -24,13 +24,9 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
   if (!token) return false
 
   const scope = token.scope ?? ''
-  if (profile.apiMode === 'images') {
-    return scope.includes('images:create') || scope.includes('image_generation')
-  }
-  if (profile.apiMode === 'responses') {
-    return scope.includes('responses:create')
-  }
-  return false
+  return scope.includes('images:create') ||
+    scope.includes('image_generation') ||
+    scope.includes('responses:create')
 }
 
 // Returns the Bearer token for Authorization header.

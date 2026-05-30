@@ -127,7 +127,7 @@ export default function ConfirmDialog() {
           />
         )}
         {customButtons.length > 0 ? (
-          <div className="flex gap-2">
+          <div className={`flex flex-wrap gap-2 ${confirmDialog.buttonsScrollable ? 'max-h-60 overflow-y-auto' : ''}`}>
             {customButtons.map((button) => (
               <button
                 key={button.label}
