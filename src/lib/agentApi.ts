@@ -2,6 +2,7 @@ import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiP
 import { dataUrlToBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { appendStreamingFormatHint, assertImageInputPayloadSize, fetchImageUrlAsDataUrl, maybeAppendStreamingHint, getApiErrorMessage, isHttpUrl, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import { DEFAULT_RESPONSES_MODEL } from './apiProfiles'
 import i18n from './i18n'
 
 export interface AgentApiResultImage {
@@ -833,7 +834,7 @@ export async function callAgentResponsesApi(opts: {
   try {
     const createBody = (includeImageTool: boolean): Record<string, unknown> => {
       const body: Record<string, unknown> = {
-        model: profile.responsesModel || profile.model || settings.model,
+        model: profile.responsesModel || DEFAULT_RESPONSES_MODEL,
         instructions: createAgentInstructions(settings, useAppManagedImageGeneration, includeImageTool),
         input,
         tools: createAgentTools(params, profile, settings, maskDataUrl, useAppManagedImageGeneration, includeImageTool),
@@ -922,7 +923,7 @@ export async function callAgentConversationTitleApi(opts: {
         headers: await createHeaders(profile),
         cache: 'no-store',
         body: JSON.stringify({
-          model: profile.responsesModel || profile.model || settings.model,
+          model: profile.responsesModel || DEFAULT_RESPONSES_MODEL,
           instructions: AGENT_TITLE_INSTRUCTIONS,
           input: [{ role: 'user', content }],
           max_output_tokens: 32,
