@@ -34,12 +34,10 @@ export function clearSelectedGroups(): void {
   }
 }
 
-/** Fetch allowed groups from /v1/me that support Responses API */
+/** Fetch allowed groups from /v1/me */
 export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
   const { fetchMe } = await import('./sakrylleAccount')
   const me = await fetchMe()
   if (!me?.allowed_groups?.length) return []
-  return me.allowed_groups.filter((g) =>
-    g.capabilities?.includes('responses:create') ?? true
-  )
+  return me.allowed_groups
 }
