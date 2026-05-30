@@ -779,7 +779,7 @@ export async function callAgentResponsesApi(opts: {
   try {
     const createBody = (includeImageTool: boolean): Record<string, unknown> => {
       const body: Record<string, unknown> = {
-        model: profile.model || settings.model,
+        model: profile.responsesModel || profile.model || settings.model,
         instructions: createAgentInstructions(settings, useAppManagedImageGeneration, includeImageTool),
         input,
         tools: createAgentTools(params, profile, settings, maskDataUrl, useAppManagedImageGeneration, includeImageTool),
@@ -867,7 +867,7 @@ export async function callAgentConversationTitleApi(opts: {
         headers: await createHeaders(profile),
         cache: 'no-store',
         body: JSON.stringify({
-          model: profile.model || settings.model,
+          model: profile.responsesModel || profile.model || settings.model,
           instructions: AGENT_TITLE_INSTRUCTIONS,
           input: [{ role: 'user', content }],
           max_output_tokens: 32,

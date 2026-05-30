@@ -120,6 +120,8 @@
       "responsesGroupLoading": "Loading groups...",
       "responsesGroupNone": "Not selected (use default)",
       "modelId": "Model ID",
+      "modelIdImages": "Model ID (Images API)",
+      "modelIdResponses": "Model ID (Responses API)",
       "modelHintResponses": "The Responses API requires a text model that supports the image_generation tool, e.g. {{model}}.",
       "modelHintImages": "The Images API requires a GPT Image model, e.g. {{model}}.",
       "modelHintQuery": "Override via query string: ?model=.",

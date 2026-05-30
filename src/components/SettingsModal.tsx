@@ -1253,7 +1253,8 @@ export default function SettingsModal() {
                 </div>
               </div>
 
-              {/* 5. API Key */}
+              {/* 5. API Key — hidden when OAuth is active */}
+              {!(sakrylleLoggedIn && canUseOAuthForProfile(activeProfile)) && (
               <div className="block">
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">{t('settings.api.apiKeyManual')}</span>
                 <div className="relative">
@@ -1293,16 +1294,17 @@ export default function SettingsModal() {
                   }
                 </div>
               </div>
+              )}
 
               {/* 6. Responses API 分组选择器（OAuth 登录时显示） */}
               {activeProfile.provider === 'openai' && sakrylleLoggedIn && (
                 <ResponsesGroupSelector />
               )}
 
-              {/* 7. 模型 ID（紧跟接口选择） */}
+              {/* 7. 模型 ID（Images API） */}
               <label className="block">
                 <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
-                  {t('settings.api.modelId')}
+                  {t('settings.api.modelIdImages')}
                 </span>
                 <input
                   value={activeProfile.model}
@@ -1314,11 +1316,28 @@ export default function SettingsModal() {
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
                   {t('settings.api.modelHintImages', { model: DEFAULT_IMAGES_MODEL })}
-                  {activeProfile.provider === 'openai' && (
-                    <> {t('settings.api.modelHintQuery')}</>
-                  )}
                 </div>
               </label>
+
+              {/* 7.5. 模型 ID（Responses API） */}
+              {activeProfile.provider === 'openai' && (
+              <label className="block">
+                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
+                  {t('settings.api.modelIdResponses')}
+                </span>
+                <input
+                  value={activeProfile.responsesModel ?? ''}
+                  onChange={(e) => updateActiveProfile({ responsesModel: e.target.value })}
+                  onBlur={(e) => commitActiveProfilePatch({ responsesModel: e.target.value })}
+                  type="text"
+                  placeholder={DEFAULT_RESPONSES_MODEL}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+                />
+                <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
+                  {t('settings.api.modelHintResponses', { model: DEFAULT_RESPONSES_MODEL })}
+                </div>
+              </label>
+              )}
 
               {/* 8. 流式传输 + 中间步骤图像数 */}
               {activeProfile.provider === 'openai' && (

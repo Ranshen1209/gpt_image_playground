@@ -120,6 +120,8 @@
       "responsesGroupLoading": "加载分组...",
       "responsesGroupNone": "未选择（使用默认）",
       "modelId": "模型 ID",
+      "modelIdImages": "模型 ID（Images API）",
+      "modelIdResponses": "模型 ID（Responses API）",
       "modelHintResponses": "Responses API 需要使用支持 image_generation 工具的文本模型，例如 {{model}}。",
       "modelHintImages": "Images API 需要使用 GPT Image 模型，例如 {{model}}。",
       "modelHintQuery": "支持通过查询参数覆盖：?model=。",
