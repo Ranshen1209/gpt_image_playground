@@ -39,8 +39,8 @@ export function clearSelectedGroups(): void {
 
 function normalizeGroup(raw: any): SakrylleGroup | null {
   if (!raw || typeof raw !== 'object') return null
-  const id = raw.id ?? raw.group_id
-  const name = raw.name ?? raw.group_name ?? raw.title ?? `Group ${id}`
+  const id = raw.id || raw.group_id
+  const name = raw.name || raw.group_name || raw.title || `Group ${id}`
   if (!id) return null
   return { id: Number(id), name: String(name) }
 }
