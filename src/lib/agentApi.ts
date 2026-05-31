@@ -4,6 +4,7 @@ import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devP
 import { assertImageInputPayloadSize, fetchImageUrlAsDataUrl, getApiErrorMessage, isHttpUrl, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
 import { DEFAULT_RESPONSES_MODEL } from './apiProfiles'
 import i18n from './i18n'
+import { getSakrylleImageRequestParams } from './sakrylleImageSize'
 
 export interface AgentApiMessage {
   role: 'user' | 'assistant'
@@ -148,18 +149,19 @@ function shouldUseAppManagedImageGeneration(profile: ApiProfile, profiles: ApiPr
 }
 
 function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: string): Record<string, unknown> {
+  const requestParams = getSakrylleImageRequestParams(params, profile)
   const tool: Record<string, unknown> = {
     type: 'image_generation',
     action: 'auto',
-    size: params.size,
-    output_format: params.output_format,
-    moderation: params.moderation,
+    size: requestParams.size,
+    output_format: requestParams.output_format,
+    moderation: requestParams.moderation,
   }
 
-  tool.quality = params.quality
+  tool.quality = requestParams.quality
 
-  if (params.output_format !== 'png' && params.output_compression != null) {
-    tool.output_compression = params.output_compression
+  if (requestParams.output_format !== 'png' && requestParams.output_compression != null) {
+    tool.output_compression = requestParams.output_compression
   }
 
   if (profile.streamImages) {
@@ -922,7 +924,8 @@ async function callBatchImageSingleViaImagesApi(opts: {
   onImageToolStarted?: () => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<BatchImageCallResult> {
-  const { profile, params, batchItemId, prompt, referenceImageDataUrls, signal, onImageToolStarted, onImageToolCompleted } = opts
+  const { profile, batchItemId, prompt, referenceImageDataUrls, signal, onImageToolStarted, onImageToolCompleted } = opts
+  const params = getSakrylleImageRequestParams(opts.params, profile)
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
@@ -1095,7 +1098,8 @@ export async function callBatchImageSingle(opts: {
   }
 
   // Otherwise use Responses API with image_generation tool
-  const mime = MIME_MAP[params.output_format] || 'image/png'
+  const requestParams = getSakrylleImageRequestParams(params, profile)
+  const mime = MIME_MAP[requestParams.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
   const controller = new AbortController()
@@ -1130,13 +1134,13 @@ export async function callBatchImageSingle(opts: {
     const tool: Record<string, unknown> = {
       type: 'image_generation',
       action: referenceImageDataUrls.length > 0 ? 'auto' : 'generate',
-      size: params.size,
-      output_format: params.output_format,
-      moderation: params.moderation,
-      quality: params.quality,
+      size: requestParams.size,
+      output_format: requestParams.output_format,
+      moderation: requestParams.moderation,
+      quality: requestParams.quality,
     }
-    if (params.output_format !== 'png' && params.output_compression != null) {
-      tool.output_compression = params.output_compression
+    if (requestParams.output_format !== 'png' && requestParams.output_compression != null) {
+      tool.output_compression = requestParams.output_compression
     }
     if (profile.streamImages) {
       tool.partial_images = profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES

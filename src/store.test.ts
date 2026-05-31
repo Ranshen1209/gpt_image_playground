@@ -101,6 +101,7 @@ vi.mock('./lib/agentApi', () => ({
   }),
 }))
 import { clearAgentConversations, clearImages, getAllAgentConversations, getAllTasks, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
+import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { cleanStaleAgentInputDrafts, deleteAgentRoundFromConversation, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, useStore } from './store'
 
@@ -263,6 +264,37 @@ describe('mask draft lifecycle in store actions', () => {
     })
     expect(state.prompt).toBe('')
     expect(state.inputImages).toEqual([])
+  })
+
+  it('preserves Sakrylle Images API model variants instead of forcing gpt-image-2', async () => {
+    vi.mocked(callImageApi).mockClear()
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile-4k',
+      name: 'GPT Image 4K',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: 'gpt-image-4k',
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        profiles: [imageProfile],
+        activeProfileId: imageProfile.id,
+      }),
+      prompt: 'draw in 4k',
+    })
+
+    await submitTask()
+    for (let i = 0; i < 20 && vi.mocked(callImageApi).mock.calls.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const state = useStore.getState()
+    expect(state.tasks[0]).toMatchObject({
+      apiProfileId: imageProfile.id,
+      apiModel: 'gpt-image-4k',
+    })
+    expect(vi.mocked(callImageApi).mock.calls[0]?.[0].settings.model).toBe('gpt-image-4k')
   })
 
   it('does not let temporary reuse switch gallery generation back to a Responses profile', async () => {

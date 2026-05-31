@@ -9,9 +9,19 @@ export interface SelectedGroups {
   images?: number
 }
 
-export function getSelectedGroups(): SelectedGroups {
+function getLocalStorage(): Storage | null {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+export function getSelectedGroups(): SelectedGroups {
+  const storage = getLocalStorage()
+  if (!storage) return {}
+  try {
+    const stored = storage.getItem(STORAGE_KEY)
     if (!stored) return {}
     return JSON.parse(stored) as SelectedGroups
   } catch {
@@ -20,27 +30,33 @@ export function getSelectedGroups(): SelectedGroups {
 }
 
 export function setSelectedGroup(apiMode: 'images' | 'responses', groupId: number): void {
+  const storage = getLocalStorage()
+  if (!storage) return
   const current = getSelectedGroups()
   if (apiMode === 'responses') current.responses = groupId
   if (apiMode === 'images') current.images = groupId
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
+    storage.setItem(STORAGE_KEY, JSON.stringify(current))
   } catch {
     // ignore storage errors
   }
 }
 
 export function clearSelectedGroups(): void {
+  const storage = getLocalStorage()
+  if (!storage) return
   try {
-    localStorage.removeItem(STORAGE_KEY)
+    storage.removeItem(STORAGE_KEY)
   } catch {
     // ignore
   }
 }
 
 function readCachedGroupNames(): Record<string, string> {
+  const storage = getLocalStorage()
+  if (!storage) return {}
   try {
-    const stored = localStorage.getItem(GROUP_NAMES_STORAGE_KEY)
+    const stored = storage.getItem(GROUP_NAMES_STORAGE_KEY)
     if (!stored) return {}
     const parsed = JSON.parse(stored) as Record<string, unknown>
     const names: Record<string, string> = {}
@@ -58,6 +74,8 @@ function isFallbackGroupName(id: number, name: string): boolean {
 }
 
 function cacheGroupNames(groups: SakrylleGroup[]): void {
+  const storage = getLocalStorage()
+  if (!storage) return
   try {
     const current = readCachedGroupNames()
     let changed = false
@@ -68,7 +86,7 @@ function cacheGroupNames(groups: SakrylleGroup[]): void {
       current[String(group.id)] = name
       changed = true
     }
-    if (changed) localStorage.setItem(GROUP_NAMES_STORAGE_KEY, JSON.stringify(current))
+    if (changed) storage.setItem(GROUP_NAMES_STORAGE_KEY, JSON.stringify(current))
   } catch {
     // ignore storage errors
   }

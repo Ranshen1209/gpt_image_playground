@@ -1734,7 +1734,7 @@ function isImagesApiProfile(profile: ApiProfile | null | undefined): profile is 
 }
 
 function normalizeGalleryImageProfile(profile: ApiProfile): ApiProfile {
-  if (isSakrylleApiBaseUrl(profile.baseUrl) || profile.model === DEFAULT_RESPONSES_MODEL) {
+  if (profile.model === DEFAULT_RESPONSES_MODEL) {
     return { ...profile, model: DEFAULT_IMAGES_MODEL }
   }
   return profile

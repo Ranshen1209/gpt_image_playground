@@ -137,7 +137,8 @@ export default function Header() {
   const handleToggleTheme = (event: React.MouseEvent<HTMLButtonElement>) => {
     dismissAllTooltips()
     const rect = event.currentTarget.getBoundingClientRect()
-    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    const current: Theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+    const next: Theme = current === 'dark' ? 'light' : 'dark'
     setThemeState(next)
     switchTheme(next, {
       origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
