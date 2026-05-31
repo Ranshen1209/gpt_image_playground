@@ -41,69 +41,17 @@ interface SwitchOptions {
   origin?: { x: number, y: number }
 }
 
-let activeThemeSnapshot: HTMLIFrameElement | null = null
-
-function escapeHtmlAttribute(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+interface ThemeViewTransition {
+  finished: Promise<void>
+  ready: Promise<void>
+  skipTransition?: () => void
 }
 
-function getSnapshotStyles(): string {
-  let css = ''
-  for (const sheet of Array.from(document.styleSheets)) {
-    try {
-      for (const rule of Array.from(sheet.cssRules)) {
-        css += `${rule.cssText}\n`
-      }
-    } catch {
-      // Cross-origin stylesheets are ignored; the main app CSS is same-origin.
-    }
-  }
-  return css
+type DocumentWithViewTransition = Document & {
+  startViewTransition?: (cb: () => void | Promise<void>) => ThemeViewTransition
 }
 
-function getSnapshotBodyHtml(): string {
-  const clone = document.body.cloneNode(true) as HTMLElement
-  clone.querySelectorAll('.theme-switch-snapshot, script').forEach((node) => node.remove())
-  return clone.innerHTML
-}
-
-function createThemeSnapshotFrame() {
-  const iframe = document.createElement('iframe')
-  iframe.className = 'theme-switch-snapshot'
-  iframe.setAttribute('aria-hidden', 'true')
-  iframe.tabIndex = -1
-  iframe.style.colorScheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
-
-  const htmlClass = escapeHtmlAttribute(document.documentElement.className)
-  const lang = escapeHtmlAttribute(document.documentElement.lang)
-  const bodyClass = escapeHtmlAttribute(document.body.className)
-  const styles = getSnapshotStyles()
-  const bodyHtml = getSnapshotBodyHtml()
-
-  document.body.appendChild(iframe)
-  const doc = iframe.contentDocument
-  if (!doc) return iframe
-  doc.open()
-  doc.write(`<!doctype html>
-<html class="${htmlClass}" lang="${lang}">
-<head>
-<base href="${escapeHtmlAttribute(document.baseURI)}">
-<style>${styles}</style>
-<style>
-  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden !important; pointer-events: none !important; }
-  body { min-height: 100%; }
-  *, *::before, *::after { caret-color: transparent !important; }
-</style>
-</head>
-<body class="${bodyClass}">${bodyHtml}</body>
-</html>`)
-  doc.close()
-  return iframe
-}
+let activeThemeTransition: ThemeViewTransition | null = null
 
 export function switchTheme(next: Theme, options: SwitchOptions = {}) {
   if (typeof document === 'undefined') return
@@ -124,22 +72,26 @@ export function switchTheme(next: Theme, options: SwitchOptions = {}) {
     persistTheme(next)
   }
 
-  if (reduceMotion) {
+  const startViewTransition = (document as DocumentWithViewTransition).startViewTransition
+
+  // No View Transition support (or reduced motion) → swap instantly.
+  if (!startViewTransition || reduceMotion) {
     apply()
     return
   }
 
-  activeThemeSnapshot?.remove()
-  const snapshot = createThemeSnapshotFrame()
-  apply()
-  activeThemeSnapshot = snapshot
-
-  const cleanup = () => {
-    if (activeThemeSnapshot === snapshot) {
-      activeThemeSnapshot = null
-    }
-    snapshot.remove()
-  }
-  snapshot.addEventListener('animationend', cleanup, { once: true })
-  window.setTimeout(cleanup, 1100)
+  // The browser snapshots the old frame, applies the new theme, then animates
+  // the new snapshot in. clip-path expand from the click point is driven by the
+  // ::view-transition-new(root) keyframes in index.css. Native GPU compositing,
+  // so no flash and no per-element transition stutter.
+  activeThemeTransition?.skipTransition?.()
+  const transition = startViewTransition.call(document, apply)
+  activeThemeTransition = transition
+  void transition.finished
+    .catch(() => {})
+    .finally(() => {
+      if (activeThemeTransition === transition) {
+        activeThemeTransition = null
+      }
+    })
 }
