@@ -41,12 +41,18 @@ interface SwitchOptions {
   origin?: { x: number, y: number }
 }
 
-interface ThemeViewTransition {
-  finished: Promise<void>
-  skipTransition?: () => void
-}
+let activeThemeOverlay: HTMLElement | null = null
 
-let activeThemeTransition: ThemeViewTransition | null = null
+function getThemeOverlayStyle() {
+  const body = document.body
+  const bodyStyle = window.getComputedStyle(body)
+  const ambientStyle = window.getComputedStyle(body, '::before')
+
+  return {
+    backgroundColor: bodyStyle.backgroundColor || 'transparent',
+    backgroundImage: ambientStyle.backgroundImage === 'none' ? '' : ambientStyle.backgroundImage,
+  }
+}
 
 export function switchTheme(next: Theme, options: SwitchOptions = {}) {
   if (typeof document === 'undefined') return
@@ -59,10 +65,6 @@ export function switchTheme(next: Theme, options: SwitchOptions = {}) {
   root.style.setProperty('--theme-switch-x', `${x}px`)
   root.style.setProperty('--theme-switch-y', `${y}px`)
 
-  const startViewTransition = (document as Document & {
-    startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> }
-  }).startViewTransition
-
   const reduceMotion = typeof window !== 'undefined'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -71,19 +73,30 @@ export function switchTheme(next: Theme, options: SwitchOptions = {}) {
     persistTheme(next)
   }
 
-  if (!startViewTransition || reduceMotion) {
+  if (reduceMotion) {
     apply()
     return
   }
 
-  activeThemeTransition?.skipTransition?.()
-  const transition = startViewTransition.call(document, apply) as ThemeViewTransition
-  activeThemeTransition = transition
-  void transition.finished
-    .catch(() => {})
-    .finally(() => {
-      if (activeThemeTransition === transition) {
-        activeThemeTransition = null
-      }
-    })
+  activeThemeOverlay?.remove()
+  const overlayStyle = getThemeOverlayStyle()
+  apply()
+
+  const overlay = document.createElement('div')
+  overlay.className = 'theme-switch-overlay'
+  overlay.style.backgroundColor = overlayStyle.backgroundColor
+  if (overlayStyle.backgroundImage) {
+    overlay.style.backgroundImage = overlayStyle.backgroundImage
+  }
+  document.body.appendChild(overlay)
+  activeThemeOverlay = overlay
+
+  const cleanup = () => {
+    if (activeThemeOverlay === overlay) {
+      activeThemeOverlay = null
+    }
+    overlay.remove()
+  }
+  overlay.addEventListener('animationend', cleanup, { once: true })
+  window.setTimeout(cleanup, 2600)
 }
