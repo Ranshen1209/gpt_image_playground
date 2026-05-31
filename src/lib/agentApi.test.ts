@@ -458,6 +458,42 @@ describe('callBatchImageSingle', () => {
     expect(result.image?.dataUrl).toBe('data:image/png;base64,aW1hZ2U=')
   })
 
+  it('caps Sakrylle app-managed Images API batch requests above the 1K tier', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-images',
+      apiKey: 'image-key',
+      apiMode: 'images',
+      model: 'gpt-image-2',
+    })
+    const responsesProfile = createDefaultOpenAIProfile({
+      id: 'sakrylle-chat',
+      apiKey: 'chat-key',
+      apiMode: 'responses',
+      model: 'gpt-5.5',
+      imageProfileId: imageProfile.id,
+    })
+
+    await callBatchImageSingle({
+      profile: responsesProfile,
+      allProfiles: [responsesProfile, imageProfile],
+      params: { ...DEFAULT_PARAMS, size: '2048x2048' },
+      batchItemId: 'item-1',
+      prompt: '画一只猫',
+      referenceImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      size: '1248x1248',
+    })
+  })
+
   it('uses gallery-compatible multipart fields for Agent Images API edits', async () => {
     const realFetch = globalThis.fetch
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

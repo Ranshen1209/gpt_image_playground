@@ -41,6 +41,13 @@ interface SwitchOptions {
   origin?: { x: number, y: number }
 }
 
+interface ThemeViewTransition {
+  finished: Promise<void>
+  skipTransition?: () => void
+}
+
+let activeThemeTransition: ThemeViewTransition | null = null
+
 export function switchTheme(next: Theme, options: SwitchOptions = {}) {
   if (typeof document === 'undefined') return
   const root = document.documentElement
@@ -69,6 +76,14 @@ export function switchTheme(next: Theme, options: SwitchOptions = {}) {
     return
   }
 
-  const transition = startViewTransition.call(document, apply)
-  void transition.finished.catch(() => {})
+  activeThemeTransition?.skipTransition?.()
+  const transition = startViewTransition.call(document, apply) as ThemeViewTransition
+  activeThemeTransition = transition
+  void transition.finished
+    .catch(() => {})
+    .finally(() => {
+      if (activeThemeTransition === transition) {
+        activeThemeTransition = null
+      }
+    })
 }
