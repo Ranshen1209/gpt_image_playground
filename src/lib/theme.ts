@@ -41,7 +41,69 @@ interface SwitchOptions {
   origin?: { x: number, y: number }
 }
 
-let activeThemeRipple: HTMLElement | null = null
+let activeThemeSnapshot: HTMLIFrameElement | null = null
+
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function getSnapshotStyles(): string {
+  let css = ''
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      for (const rule of Array.from(sheet.cssRules)) {
+        css += `${rule.cssText}\n`
+      }
+    } catch {
+      // Cross-origin stylesheets are ignored; the main app CSS is same-origin.
+    }
+  }
+  return css
+}
+
+function getSnapshotBodyHtml(): string {
+  const clone = document.body.cloneNode(true) as HTMLElement
+  clone.querySelectorAll('.theme-switch-snapshot, script').forEach((node) => node.remove())
+  return clone.innerHTML
+}
+
+function createThemeSnapshotFrame() {
+  const iframe = document.createElement('iframe')
+  iframe.className = 'theme-switch-snapshot'
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.tabIndex = -1
+  iframe.style.colorScheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+
+  const htmlClass = escapeHtmlAttribute(document.documentElement.className)
+  const lang = escapeHtmlAttribute(document.documentElement.lang)
+  const bodyClass = escapeHtmlAttribute(document.body.className)
+  const styles = getSnapshotStyles()
+  const bodyHtml = getSnapshotBodyHtml()
+
+  document.body.appendChild(iframe)
+  const doc = iframe.contentDocument
+  if (!doc) return iframe
+  doc.open()
+  doc.write(`<!doctype html>
+<html class="${htmlClass}" lang="${lang}">
+<head>
+<base href="${escapeHtmlAttribute(document.baseURI)}">
+<style>${styles}</style>
+<style>
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden !important; pointer-events: none !important; }
+  body { min-height: 100%; }
+  *, *::before, *::after { caret-color: transparent !important; }
+</style>
+</head>
+<body class="${bodyClass}">${bodyHtml}</body>
+</html>`)
+  doc.close()
+  return iframe
+}
 
 export function switchTheme(next: Theme, options: SwitchOptions = {}) {
   if (typeof document === 'undefined') return
@@ -67,20 +129,17 @@ export function switchTheme(next: Theme, options: SwitchOptions = {}) {
     return
   }
 
-  activeThemeRipple?.remove()
+  activeThemeSnapshot?.remove()
+  const snapshot = createThemeSnapshotFrame()
   apply()
-
-  const ripple = document.createElement('div')
-  ripple.className = 'theme-switch-ripple'
-  document.body.appendChild(ripple)
-  activeThemeRipple = ripple
+  activeThemeSnapshot = snapshot
 
   const cleanup = () => {
-    if (activeThemeRipple === ripple) {
-      activeThemeRipple = null
+    if (activeThemeSnapshot === snapshot) {
+      activeThemeSnapshot = null
     }
-    ripple.remove()
+    snapshot.remove()
   }
-  ripple.addEventListener('animationend', cleanup, { once: true })
-  window.setTimeout(cleanup, 1300)
+  snapshot.addEventListener('animationend', cleanup, { once: true })
+  window.setTimeout(cleanup, 1100)
 }
