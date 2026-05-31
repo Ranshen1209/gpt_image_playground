@@ -41,18 +41,7 @@ interface SwitchOptions {
   origin?: { x: number, y: number }
 }
 
-let activeThemeOverlay: HTMLElement | null = null
-
-function getThemeOverlayStyle() {
-  const body = document.body
-  const bodyStyle = window.getComputedStyle(body)
-  const ambientStyle = window.getComputedStyle(body, '::before')
-
-  return {
-    backgroundColor: bodyStyle.backgroundColor || 'transparent',
-    backgroundImage: ambientStyle.backgroundImage === 'none' ? '' : ambientStyle.backgroundImage,
-  }
-}
+let activeThemeRipple: HTMLElement | null = null
 
 export function switchTheme(next: Theme, options: SwitchOptions = {}) {
   if (typeof document === 'undefined') return
@@ -78,25 +67,20 @@ export function switchTheme(next: Theme, options: SwitchOptions = {}) {
     return
   }
 
-  activeThemeOverlay?.remove()
-  const overlayStyle = getThemeOverlayStyle()
+  activeThemeRipple?.remove()
   apply()
 
-  const overlay = document.createElement('div')
-  overlay.className = 'theme-switch-overlay'
-  overlay.style.backgroundColor = overlayStyle.backgroundColor
-  if (overlayStyle.backgroundImage) {
-    overlay.style.backgroundImage = overlayStyle.backgroundImage
-  }
-  document.body.appendChild(overlay)
-  activeThemeOverlay = overlay
+  const ripple = document.createElement('div')
+  ripple.className = 'theme-switch-ripple'
+  document.body.appendChild(ripple)
+  activeThemeRipple = ripple
 
   const cleanup = () => {
-    if (activeThemeOverlay === overlay) {
-      activeThemeOverlay = null
+    if (activeThemeRipple === ripple) {
+      activeThemeRipple = null
     }
-    overlay.remove()
+    ripple.remove()
   }
-  overlay.addEventListener('animationend', cleanup, { once: true })
-  window.setTimeout(cleanup, 2600)
+  ripple.addEventListener('animationend', cleanup, { once: true })
+  window.setTimeout(cleanup, 1300)
 }
