@@ -225,7 +225,8 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
       setModels(filtered)
       const currentValue = latestValueRef.current.trim()
       const currentModelStillAvailable = filtered.some((model) => model.id === currentValue)
-      const nextModel = filtered[0]?.id
+      const defaultModel = filtered.find((model) => model.id === placeholder)?.id
+      const nextModel = defaultModel ?? filtered[0]?.id
       if (nextModel && (!currentValue || !currentModelStillAvailable)) {
         latestOnChangeRef.current(nextModel)
       }

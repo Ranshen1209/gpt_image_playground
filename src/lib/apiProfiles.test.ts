@@ -296,6 +296,12 @@ describe('default profile', () => {
     expect(getActiveApiProfile(settings).responsesModel).toBe('gpt-5.3-codex')
   })
 
+  it('defaults the Responses API model to gpt-5.5', () => {
+    expect(createDefaultOpenAIProfile().responsesModel).toBe(DEFAULT_RESPONSES_MODEL)
+    expect(normalizeSettings({}).profiles[0].responsesModel).toBe(DEFAULT_RESPONSES_MODEL)
+    expect(getActiveApiProfile({}).responsesModel).toBe(DEFAULT_RESPONSES_MODEL)
+  })
+
   it('falls back to Sakrylle API URL when no override is set', () => {
     expect(createDefaultOpenAIProfile().baseUrl).toBe('https://api.sakrylle.com/v1')
     expect(DEFAULT_SETTINGS.baseUrl).toBe('https://api.sakrylle.com/v1')
