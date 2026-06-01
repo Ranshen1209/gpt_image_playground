@@ -2,10 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { canUseOAuthForProfile, resolveBearerToken } from './oauthFallback'
 import type { ApiProfile } from '../types'
 import * as sakrylleAuth from './sakrylleAuth'
+import * as sakrylleAccount from './sakrylleAccount'
 
 vi.mock('./sakrylleAuth', () => ({
   getStoredToken: vi.fn(),
   refreshIfNeeded: vi.fn(),
+  refreshWithGroupId: vi.fn(),
+}))
+
+vi.mock('./sakrylleAccount', () => ({
+  fetchMe: vi.fn(async () => null),
 }))
 
 vi.mock('./runtimeEnv', () => ({
@@ -110,24 +116,24 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
-    it('returns true regardless of apiMode when token has images:create scope', () => {
+    it('returns false for responses mode when token only has images:create scope', () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,
         scope: 'images:create',
       })
-      expect(canUseOAuthForProfile(profile)).toBe(true)
+      expect(canUseOAuthForProfile(profile)).toBe(false)
     })
 
-    it('returns true regardless of apiMode when token has responses:create scope', () => {
+    it('returns false for images mode when token only has responses:create scope', () => {
       const profile = createProfile({ apiMode: 'images' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,
         scope: 'responses:create',
       })
-      expect(canUseOAuthForProfile(profile)).toBe(true)
+      expect(canUseOAuthForProfile(profile)).toBe(false)
     })
 
     it('handles missing scope field gracefully', () => {
@@ -149,7 +155,7 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
-    it('returns true when primary token has relevant scope even with unrelated additionalTokens', () => {
+    it('returns false for Responses mode when primary token only has images:create even with unrelated additionalTokens', () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'sk_oauth_images',
@@ -163,7 +169,7 @@ describe('oauthFallback', () => {
           },
         ],
       })
-      expect(canUseOAuthForProfile(profile)).toBe(true)
+      expect(canUseOAuthForProfile(profile)).toBe(false)
     })
   })
 
@@ -278,6 +284,55 @@ describe('oauthFallback', () => {
       const token = await resolveBearerToken(profile)
 
       expect(token).toBe('sk_oauth_group9_4k')
+    })
+
+    it('does not fall back to an image group token for Responses requests', async () => {
+      const profile = createProfile({ apiMode: 'responses' })
+      const oauthToken = {
+        accessToken: 'sk_oauth_image_group',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+        group: { id: 11, name: 'GPT-Image-2-4K' },
+      }
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue(oauthToken)
+      vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue(oauthToken)
+      vi.mocked(sakrylleAccount.fetchMe).mockResolvedValue(null)
+
+      await expect(resolveBearerToken(profile)).rejects.toThrow('missing_credentials')
+      expect(sakrylleAuth.refreshWithGroupId).not.toHaveBeenCalled()
+    })
+
+    it('refreshes for a selected Responses group when the exact token is missing', async () => {
+      vi.stubGlobal('localStorage', createMockStorage())
+      localStorage.setItem('sakrylle-image-playground.selected-groups', JSON.stringify({ responses: 9 }))
+      const profile = createProfile({ apiMode: 'responses' })
+      const oauthToken = {
+        accessToken: 'sk_oauth_image_group',
+        refreshToken: 'rt',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+        group: { id: 5, name: 'GPT-Image' },
+      }
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue(oauthToken)
+      vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue(oauthToken)
+      vi.mocked(sakrylleAccount.fetchMe).mockResolvedValue({
+        granted_scopes: [],
+        effective_capabilities: [],
+        allowed_groups: [
+          { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+          { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
+        ],
+      })
+      vi.mocked(sakrylleAuth.refreshWithGroupId).mockResolvedValue({
+        accessToken: 'sk_oauth_responses_group',
+        refreshToken: 'rt-next',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+        group: { id: 9, name: 'GPT-Pro' },
+      })
+
+      await expect(resolveBearerToken(profile)).resolves.toBe('sk_oauth_responses_group')
+      expect(sakrylleAuth.refreshWithGroupId).toHaveBeenCalledWith(9)
     })
   })
 })

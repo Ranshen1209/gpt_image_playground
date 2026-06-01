@@ -157,6 +157,15 @@ describe('getGroupsForApiMode', () => {
     expect(resolveSelectedGroupId('images', groups)).toBe(5)
     expect(resolveSelectedGroupId('responses', groups)).toBe(9)
   })
+
+  it('does not use image-only groups as a Responses fallback', () => {
+    const groups = [
+      { id: 11, name: 'GPT-Image-2-4K', capabilities: ['images:create', 'responses:create'] },
+    ]
+
+    expect(getGroupsForApiMode('responses', groups)).toEqual([])
+    expect(resolveSelectedGroupId('responses', groups)).toBeUndefined()
+  })
 })
 
 describe('getGroupAccessToken', () => {
@@ -167,6 +176,10 @@ describe('getGroupAccessToken', () => {
 
   it('falls back to the primary token for unknown groups', () => {
     expect(getGroupAccessToken(999)).toBe('sk_oauth_primary_group5')
+  })
+
+  it('can require an exact group token', () => {
+    expect(getGroupAccessToken(999, { allowFallback: false })).toBeUndefined()
   })
 
   it('returns the primary token when no group is requested', () => {

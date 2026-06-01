@@ -5,8 +5,8 @@
 // (fal.ai、自定义 HTTP) 仍然要求显式 apiKey。
 
 import type { ApiProfile } from '../types'
-import { getGroupAccessToken, getSelectedGroupId } from './groupSelection'
-import { getStoredToken, refreshIfNeeded } from './sakrylleAuth'
+import { ensureSelectedGroupId, getAvailableGroups, getGroupAccessToken } from './groupSelection'
+import { getStoredToken, refreshIfNeeded, refreshWithGroupId, type SakrylleAuthToken } from './sakrylleAuth'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const SAKRYLLE_API_BASE = (readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_PLATFORM_API)
@@ -25,9 +25,13 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
   if (!token) return false
 
   const scope = token.scope ?? ''
-  return scope.includes('images:create') ||
-    scope.includes('image_generation') ||
-    scope.includes('responses:create')
+  if (profile.apiMode === 'responses') return scope.includes('responses:create')
+  return scope.includes('images:create') || scope.includes('image_generation')
+}
+
+function findTokenInAuthSnapshot(token: SakrylleAuthToken, groupId: number): string | undefined {
+  if (token.group?.id === groupId) return token.accessToken
+  return token.additionalTokens?.find((item) => item.group?.id === groupId)?.accessToken
 }
 
 // Returns the Bearer token for Authorization header.
@@ -40,6 +44,20 @@ export async function resolveBearerToken(profile: ApiProfile): Promise<string> {
   }
   const token = (await refreshIfNeeded()) ?? getStoredToken()
   if (!token) throw new Error('missing_credentials')
-  const groupId = getSelectedGroupId(profile.apiMode)
-  return getGroupAccessToken(groupId) ?? token.accessToken
+  const groupId = await ensureSelectedGroupId(profile.apiMode)
+  const hasGroupMetadata = getAvailableGroups().length > 0
+  if (profile.apiMode === 'responses' && hasGroupMetadata && groupId == null) {
+    throw new Error('missing_credentials')
+  }
+  if (groupId == null) return token.accessToken
+
+  const exactToken = getGroupAccessToken(groupId, { allowFallback: false })
+  if (exactToken) return exactToken
+
+  const refreshedForGroup = await refreshWithGroupId(groupId)
+  const refreshedExactToken = getGroupAccessToken(groupId, { allowFallback: false })
+  if (refreshedExactToken) return refreshedExactToken
+  const refreshedSnapshotToken = refreshedForGroup ? findTokenInAuthSnapshot(refreshedForGroup, groupId) : undefined
+  if (refreshedSnapshotToken) return refreshedSnapshotToken
+  throw new Error('missing_credentials')
 }
