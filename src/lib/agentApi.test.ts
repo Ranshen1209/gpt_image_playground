@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
-import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
+import { createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS } from './apiProfiles'
 import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle } from './agentApi'
 
 describe('callAgentResponsesApi', () => {
@@ -42,6 +42,7 @@ describe('callAgentResponsesApi', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.model).toBe(DEFAULT_RESPONSES_MODEL)
     expect(body.stream).toBe(true)
     expect(body.tools[0].partial_images).toBe(2)
     expect(textDeltas).toEqual(['Hel', 'lo'])
