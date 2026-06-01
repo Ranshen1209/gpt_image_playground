@@ -5,7 +5,7 @@
 // (fal.ai、自定义 HTTP) 仍然要求显式 apiKey。
 
 import type { ApiProfile } from '../types'
-import { ensureSelectedGroupId, getAvailableGroups, getGroupAccessToken } from './groupSelection'
+import { ensureSelectedGroupId, getGroupAccessToken } from './groupSelection'
 import { getStoredToken, refreshIfNeeded, refreshWithGroupId, type SakrylleAuthToken } from './sakrylleAuth'
 import { readRuntimeEnv } from './runtimeEnv'
 
@@ -45,8 +45,7 @@ export async function resolveBearerToken(profile: ApiProfile): Promise<string> {
   const token = (await refreshIfNeeded()) ?? getStoredToken()
   if (!token) throw new Error('missing_credentials')
   const groupId = await ensureSelectedGroupId(profile.apiMode)
-  const hasGroupMetadata = getAvailableGroups().length > 0
-  if (profile.apiMode === 'responses' && hasGroupMetadata && groupId == null) {
+  if (profile.apiMode === 'responses' && groupId == null) {
     throw new Error('missing_credentials')
   }
   if (groupId == null) return token.accessToken

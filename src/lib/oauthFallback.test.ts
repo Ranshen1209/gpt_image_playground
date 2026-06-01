@@ -214,20 +214,40 @@ describe('oauthFallback', () => {
       await expect(resolveBearerToken(profile)).rejects.toThrow('missing_credentials')
     })
 
-    it('returns primary token when it has responses:create scope', async () => {
+    it('returns primary token only when metadata shows it is a Responses group', async () => {
       const profile = createProfile({ apiMode: 'responses' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'sk_oauth_responses',
         expiresAt: Date.now() + 3600000,
         scope: 'images:create responses:create',
+        group: { id: 4, name: 'GPT-Plus' },
       })
       vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue({
         accessToken: 'sk_oauth_responses',
         expiresAt: Date.now() + 3600000,
         scope: 'images:create responses:create',
+        group: { id: 4, name: 'GPT-Plus' },
       })
       const token = await resolveBearerToken(profile)
       expect(token).toBe('sk_oauth_responses')
+    })
+
+    it('does not use a metadata-less primary token for Responses requests', async () => {
+      const profile = createProfile({ apiMode: 'responses' })
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
+        accessToken: 'sk_oauth_unknown_group',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+      })
+      vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue({
+        accessToken: 'sk_oauth_unknown_group',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+      })
+      vi.mocked(sakrylleAccount.fetchMe).mockResolvedValue(null)
+
+      await expect(resolveBearerToken(profile)).rejects.toThrow('missing_credentials')
+      expect(sakrylleAuth.refreshWithGroupId).not.toHaveBeenCalled()
     })
 
     it('uses primary token when it matches', async () => {

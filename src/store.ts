@@ -857,6 +857,7 @@ interface AppState {
       tone?: 'primary' | 'secondary' | 'danger' | 'warning'
       action: (checkboxChecked?: boolean) => void
     }>
+    buttonsLayout?: 'row' | 'stack'
     icon?: 'info' | 'copy'
     buttonsScrollable?: boolean
     minConfirmDelayMs?: number
@@ -1112,7 +1113,7 @@ export const useStore = create<AppState>()(
 
         const state = get()
         const settings = normalizeSettings(state.settings)
-        const activeProfile = getActiveApiProfile(settings)
+        const activeProfile = createAgentResponsesApiProfile(getActiveApiProfile(settings))
 
         const supportsResponsesApi = activeProfile.provider === 'openai' && (
           canUseOAuthForProfile(activeProfile) || activeProfile.apiKey.trim() !== ''
@@ -1134,16 +1135,21 @@ export const useStore = create<AppState>()(
           }))
           if (savedAgentScrollTop != null) requestPageScrollRestore(savedAgentScrollTop)
           void (async () => {
-            const selectedGroups = getSelectedGroups()
-            if (selectedGroups.responses) return
             const groups = getGroupsForApiMode('responses', await fetchResponsesApiGroups())
-            if (groups.length <= 1) return
+            const selectedGroupId = getSelectedGroups().responses
+            if (selectedGroupId && groups.some((group) => group.id === selectedGroupId)) return
+            if (groups.length === 1) {
+              setSelectedGroup('responses', groups[0].id)
+              return
+            }
+            if (groups.length < 1) return
             useStore.getState().setConfirmDialog({
               title: i18n.t('agent.selectGroupTitle'),
               message: i18n.t('agent.selectGroupMessage', { count: groups.length }),
               icon: 'info',
               showCancel: true,
               cancelText: i18n.t('common.cancel'),
+              buttonsLayout: 'stack',
               buttonsScrollable: groups.length > 4,
               buttons: groups.map((group) => ({
                 label: group.name,
@@ -1719,6 +1725,15 @@ function createSettingsForApiProfile(settings: AppSettings, profile: ApiProfile)
     profiles: normalized.profiles.map((item) => item.id === profile.id ? profile : item),
     activeProfileId: profile.id,
   })
+}
+
+function createAgentResponsesApiProfile(profile: ApiProfile): ApiProfile {
+  return {
+    ...profile,
+    apiMode: 'responses',
+    model: profile.responsesModel?.trim() || DEFAULT_RESPONSES_MODEL,
+    imageProfileId: profile.imageProfileId || (profile.apiMode === 'images' ? profile.id : undefined),
+  }
 }
 
 function isSakrylleApiBaseUrl(baseUrl: string): boolean {
@@ -2957,7 +2972,7 @@ export async function submitAgentMessage() {
   const state = useStore.getState()
   const { settings, prompt, inputImages, maskDraft, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
-  const activeProfile = getActiveApiProfile(normalizedSettings)
+  const activeProfile = createAgentResponsesApiProfile(getActiveApiProfile(normalizedSettings))
 
   // Check if profile supports Responses API (OAuth or explicit API key)
   const supportsResponsesApi = activeProfile.provider === 'openai' && (
@@ -3014,7 +3029,7 @@ export async function submitAgentMessage() {
     await storeImage(image.dataUrl)
   }
 
-  const requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  const requestSettings = normalizedSettings
   const now = Date.now()
   const editingRound = state.agentEditingRoundId
     ? conversation.rounds.find((item) => item.id === state.agentEditingRoundId) ?? null
@@ -3113,7 +3128,7 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   const state = useStore.getState()
   const { settings, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
-  const activeProfile = getActiveApiProfile(normalizedSettings)
+  const activeProfile = createAgentResponsesApiProfile(getActiveApiProfile(normalizedSettings))
 
   if (activeProfile.provider !== 'openai') {
     state.setAppMode('agent')
@@ -3143,7 +3158,7 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   }
 
   const inputImageIds = uniqueIds(sourceRound.inputImageIds)
-  const requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
+  const requestSettings = normalizedSettings
   const normalizedParams = {
     ...normalizeParamsForSettings(params, requestSettings, { hasInputImages: inputImageIds.length > 0 }),
     n: DEFAULT_PARAMS.n,
