@@ -193,17 +193,16 @@ export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: Sak
   const capabilityGroups = groups.filter((group) => groupSupportsModeByCapability(group, apiMode))
   const nonImageCapabilityGroups = capabilityGroups.filter((group) => !groupNameLooksImage(group))
   if (nonImageCapabilityGroups.length) return nonImageCapabilityGroups
-  if (capabilityGroups.length) return capabilityGroups
 
   const nonImageGroups = groups.filter((group) => !groupNameLooksImage(group))
-  return nonImageGroups.length ? nonImageGroups : groups
+  return nonImageGroups.length ? nonImageGroups : []
 }
 
 export function resolveSelectedGroupId(apiMode: 'images' | 'responses', groups: SakrylleGroup[]): number | undefined {
   const selected = getSelectedGroups()[apiMode]
   const candidates = getGroupsForApiMode(apiMode, groups)
   if (selected && candidates.some((group) => group.id === selected)) return selected
-  return candidates[0]?.id ?? groups[0]?.id
+  return candidates[0]?.id ?? (apiMode === 'images' ? groups[0]?.id : undefined)
 }
 
 /** Get available groups from the stored OAuth token (synchronous). */
@@ -269,12 +268,13 @@ export async function ensureSelectedGroupId(apiMode: 'images' | 'responses'): Pr
 // triggering refreshWithGroupId — so the two model selectors never race.
 // Falls back to the primary token when no specific group is requested or the
 // requested group has no dedicated token.
-export function getGroupAccessToken(groupId?: number): string | undefined {
+export function getGroupAccessToken(groupId?: number, options: { allowFallback?: boolean } = {}): string | undefined {
   const token = getStoredToken()
   if (!token) return undefined
   if (groupId == null) return token.accessToken
   const primaryId = normalizeGroup(token.group)?.id
   if (primaryId === groupId) return token.accessToken
   const match = token.additionalTokens?.find((t) => normalizeGroup(t.group)?.id === groupId)
-  return match?.accessToken ?? token.accessToken
+  if (match) return match.accessToken
+  return options.allowFallback === false ? undefined : token.accessToken
 }
