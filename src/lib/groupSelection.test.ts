@@ -166,6 +166,15 @@ describe('getGroupsForApiMode', () => {
     expect(getGroupsForApiMode('responses', groups)).toEqual([])
     expect(resolveSelectedGroupId('responses', groups)).toBeUndefined()
   })
+
+  it('does not treat generic fallback group names as Responses candidates', () => {
+    const groups = [
+      { id: 11, name: 'Group 11' },
+    ]
+
+    expect(getGroupsForApiMode('responses', groups)).toEqual([])
+    expect(resolveSelectedGroupId('responses', groups)).toBeUndefined()
+  })
 })
 
 describe('getGroupAccessToken', () => {
@@ -241,5 +250,40 @@ describe('ensureSelectedGroupId', () => {
 
     await expect(ensureSelectedGroupId('responses')).resolves.toBe(9)
     expect(getSelectedGroups().responses).toBe(9)
+  })
+
+  it('repairs a stale generic Responses selection using /v1/me groups', async () => {
+    authMock.__setToken({
+      accessToken: 'sk_oauth_group11',
+      refreshToken: 'rt_test',
+      expiresAt: Date.now() + 3_600_000,
+      group: { id: 11, name: '' },
+    })
+    setSelectedGroup('responses', 11)
+    accountMock.__setMe({
+      allowed_groups: [
+        { id: 11, name: 'GPT-Image-2-4K', capabilities: ['images:create'] },
+        { id: 4, name: 'GPT-Plus', capabilities: ['responses:create'] },
+      ],
+    })
+
+    await expect(ensureSelectedGroupId('responses')).resolves.toBe(4)
+    expect(getSelectedGroups().responses).toBe(4)
+  })
+
+  it('uses /v1/me current_group when allowed_groups is not returned', async () => {
+    authMock.__setToken({
+      accessToken: 'sk_oauth_group4',
+      refreshToken: 'rt_test',
+      expiresAt: Date.now() + 3_600_000,
+    })
+    accountMock.__setMe({
+      current_group_id: 4,
+      current_group: 'GPT-Plus',
+      effective_capabilities: ['responses:create'],
+    })
+
+    await expect(ensureSelectedGroupId('responses')).resolves.toBe(4)
+    expect(getSelectedGroups().responses).toBe(4)
   })
 })

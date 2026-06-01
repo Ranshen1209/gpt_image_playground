@@ -467,6 +467,29 @@ describe('refreshWithGroupId', () => {
     const body = new URLSearchParams(fetchMock.mock.calls[0][1]?.body as string)
     expect(body.get('group_id')).toBe('11')
   })
+
+  it('records the requested group id when the refresh response omits group metadata', async () => {
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({
+        accessToken: 'old-token',
+        refreshToken: 'rt-old',
+        expiresAt: Date.now() + 60_000,
+        scope: 'images:create responses:create',
+      }),
+    )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'new-4',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+      }),
+    )
+
+    const token = await refreshWithGroupId(4)
+
+    expect(token?.group).toEqual({ id: 4, name: 'Group 4' })
+  })
 })
 
 describe('logout', () => {

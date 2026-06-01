@@ -127,7 +127,7 @@ export default function ConfirmDialog() {
           />
         )}
         {customButtons.length > 0 ? (
-          <div className={`flex flex-wrap gap-2 ${confirmDialog.buttonsScrollable ? 'max-h-60 overflow-y-auto' : ''}`}>
+          <div className={`${confirmDialog.buttonsLayout === 'stack' ? 'flex flex-col' : 'flex flex-wrap'} gap-2 ${confirmDialog.buttonsScrollable ? 'max-h-60 overflow-y-auto' : ''}`}>
             {customButtons.map((button) => (
               <button
                 key={button.label}
@@ -137,7 +137,7 @@ export default function ConfirmDialog() {
                   setConfirmDialog(null)
                 }}
                 disabled={!canConfirm}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${getActionButtonClass(button.tone)}`}
+                className={`${confirmDialog.buttonsLayout === 'stack' ? 'w-full' : 'flex-1'} min-h-10 px-3 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${getActionButtonClass(button.tone)}`}
               >
                 {button.label}
               </button>

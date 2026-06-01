@@ -199,8 +199,14 @@ function tokenFromPayload(
   }
 
   const previousGroups = collectPreviousGroups(opts.previousToken)
+  const requestedGroup = opts.requestedGroupId
+    ? {
+        id: opts.requestedGroupId,
+        name: previousGroups.get(opts.requestedGroupId)?.name ?? `Group ${opts.requestedGroupId}`,
+      }
+    : undefined
   const normalizedGroup = normalizeTokenGroup(payload.group, previousGroups)
-    ?? (opts.requestedGroupId ? previousGroups.get(opts.requestedGroupId) : undefined)
+    ?? requestedGroup
     ?? (payload.group ? undefined : opts.previousToken?.group)
   const normalizedAdditionalTokens = mergeAdditionalTokens(
     payload.additional_tokens,

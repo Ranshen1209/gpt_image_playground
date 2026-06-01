@@ -1910,6 +1910,54 @@ describe('agent built-in image tool failure', () => {
   })
 })
 
+describe('agent profile routing', () => {
+  beforeEach(() => {
+    vi.mocked(callAgentResponsesApi).mockClear()
+    vi.mocked(callAgentResponsesApi).mockResolvedValue({
+      text: 'ok',
+      images: [],
+      outputItems: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+      responseId: 'response-a',
+    })
+  })
+
+  it('submits Agent requests with a Responses-mode profile while preserving the Images profile for tools', async () => {
+    const imageProfile = createDefaultOpenAIProfile({
+      id: 'image-profile',
+      name: 'Images',
+      apiKey: 'sakrylle-key',
+      apiMode: 'images',
+      model: DEFAULT_IMAGES_MODEL,
+      responsesModel: DEFAULT_RESPONSES_MODEL,
+    })
+
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        profiles: [imageProfile],
+        activeProfileId: imageProfile.id,
+      }),
+      prompt: '你好',
+      inputImages: [],
+      maskDraft: null,
+      params: { ...DEFAULT_PARAMS },
+      appMode: 'agent',
+      agentConversations: [agentConversation({ id: 'conversation-a' })],
+      activeAgentConversationId: 'conversation-a',
+      agentEditingRoundId: null,
+      showToast: vi.fn(),
+    })
+
+    await submitAgentMessage()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const call = vi.mocked(callAgentResponsesApi).mock.calls[0]?.[0]
+    expect(call.profile.apiMode).toBe('responses')
+    expect(call.profile.imageProfileId).toBe('image-profile')
+    expect(call.settings.profiles).toEqual([imageProfile])
+  })
+})
+
 describe('agent batch reference resolution', () => {
   const responsesProfile = createDefaultOpenAIProfile({
     id: 'responses-profile',

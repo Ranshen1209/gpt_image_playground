@@ -194,7 +194,11 @@ export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: Sak
   const nonImageCapabilityGroups = capabilityGroups.filter((group) => !groupNameLooksImage(group))
   if (nonImageCapabilityGroups.length) return nonImageCapabilityGroups
 
-  const nonImageGroups = groups.filter((group) => !groupNameLooksImage(group))
+  const nonImageGroups = groups.filter((group) => {
+    if (groupNameLooksImage(group) || isFallbackGroupName(group.id, group.name)) return false
+    const capabilities = group.capabilities ?? []
+    return !capabilities.length || groupSupportsModeByCapability(group, apiMode)
+  })
   return nonImageGroups.length ? nonImageGroups : []
 }
 
@@ -241,7 +245,15 @@ export async function fetchResponsesApiGroups(): Promise<SakrylleGroup[]> {
     const accountGroups = Array.isArray(me?.allowed_groups)
       ? me.allowed_groups.map((group) => normalizeGroup(group)).filter((group): group is SakrylleGroup => Boolean(group))
       : []
-    const groups = accountGroups.length ? mergeGroups(accountGroups, tokenGroups) : tokenGroups
+    const currentGroup = me
+      ? normalizeGroup({
+          id: me.current_group_id,
+          name: me.current_group,
+          capabilities: me.effective_capabilities,
+        })
+      : null
+    const accountAndCurrentGroups = currentGroup ? mergeGroups(accountGroups, [currentGroup]) : accountGroups
+    const groups = accountAndCurrentGroups.length ? mergeGroups(accountAndCurrentGroups, tokenGroups) : tokenGroups
     cacheGroupNames(groups)
     return groups
   } catch {

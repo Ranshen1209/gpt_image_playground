@@ -1222,7 +1222,7 @@ export const useStore = create<AppState>()(
 
         const state = get()
         const settings = normalizeSettings(state.settings)
-        const activeProfile = getActiveApiProfile(settings)
+        const activeProfile = createAgentResponsesApiProfile(getAgentTextApiProfile(settings) ?? getActiveApiProfile(settings))
         const agentValidationError = getAgentProfileValidationError(settings)
 
         const supportsResponsesApi = activeProfile.provider === 'openai' && (
@@ -1251,6 +1251,8 @@ export const useStore = create<AppState>()(
             if (selectedGroupId && groups.some((group) => group.id === selectedGroupId)) return
             if (groups.length === 1) {
               setSelectedGroup('responses', groups[0].id)
+              const { refreshWithGroupId } = await import('./lib/sakrylleAuth')
+              await refreshWithGroupId(groups[0].id)
               return
             }
             if (groups.length < 1) return
@@ -1921,6 +1923,15 @@ function createSettingsForApiProfile(settings: AppSettings, profile: ApiProfile)
     profiles: normalized.profiles.map((item) => item.id === profile.id ? profile : item),
     activeProfileId: profile.id,
   })
+}
+
+function createAgentResponsesApiProfile(profile: ApiProfile): ApiProfile {
+  return {
+    ...profile,
+    apiMode: 'responses',
+    model: profile.responsesModel?.trim() || DEFAULT_RESPONSES_MODEL,
+    imageProfileId: profile.imageProfileId || (profile.apiMode === 'images' ? profile.id : undefined),
+  }
 }
 
 function isSakrylleApiBaseUrl(baseUrl: string): boolean {
@@ -3438,9 +3449,9 @@ export async function submitAgentMessage() {
   const state = useStore.getState()
   const { settings, prompt, inputImages, maskDraft, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
-
-  const activeProfile = getAgentTextApiProfile(normalizedSettings) ?? getActiveApiProfile(normalizedSettings)
-  const imageProfile = getAgentImageApiProfile(normalizedSettings) ?? activeProfile
+  const baseAgentProfile = getAgentTextApiProfile(normalizedSettings) ?? getActiveApiProfile(normalizedSettings)
+  const activeProfile = createAgentResponsesApiProfile(baseAgentProfile)
+  const imageProfile = getAgentImageApiProfile(normalizedSettings) ?? baseAgentProfile
   const agentValidationError = getAgentProfileValidationError(normalizedSettings)
   const supportsResponsesApi = activeProfile.provider === 'openai' && (
     activeProfile.apiMode === 'responses' ||
@@ -3599,8 +3610,9 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
     return
   }
 
-  const activeProfile = getAgentTextApiProfile(normalizedSettings)!
-  const imageProfile = getAgentImageApiProfile(normalizedSettings)!
+  const baseAgentProfile = getAgentTextApiProfile(normalizedSettings)!
+  const activeProfile = createAgentResponsesApiProfile(baseAgentProfile)
+  const imageProfile = getAgentImageApiProfile(normalizedSettings) ?? baseAgentProfile
 
   const conversation = state.agentConversations.find((item) => item.id === conversationId)
   const sourceRound = conversation?.rounds.find((item) => item.id === roundId) ?? null
