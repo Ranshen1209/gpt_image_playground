@@ -2,7 +2,7 @@
 // 详见 docs/OAUTH_V2_INTEGRATION.md (§7)。
 // v2: /v1/me endpoint returns user profile + balance when account:balance:read scope is granted.
 
-import { forceRefreshToken, getStoredToken, logout, refreshIfNeeded } from './sakrylleAuth'
+import { forceRefreshToken, getStoredToken, logout, OIDC_ENABLED, refreshIfNeeded } from './sakrylleAuth'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const SAKRYLLE_API_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_PLATFORM_API)
@@ -36,11 +36,15 @@ export interface SakrylleGroup {
 
 /** v2 /v1/me response — fields are scope-cropped per docs §7. */
 export interface SakrylleMePayload {
+  /** OIDC sub claim (user ID string). Present when scope includes 'openid'. */
+  sub?: string
   user_id?: number
   username?: string
   display_name?: string
   avatar_url?: string
   locale?: string
+  email?: string
+  email_verified?: boolean
   balance?: number
   currency_display?: 'CNY' | 'USD'
   granted_scopes: string[]
@@ -149,6 +153,8 @@ async function authedFetch(path: string, init?: RequestInit): Promise<Response |
 // v2 /v1/me endpoint — docs §7. Returns null on auth failure (triggers logout).
 // Fields are scope-cropped: balance requires account:balance:read,
 // profile fields require profile:read.
+// When OIDC_ENABLED and id_token claims are available, identity fields
+// (sub/name/email) are merged from the claims as the primary source.
 export async function fetchMe(): Promise<SakrylleMePayload | null> {
   const response = await authedFetch('me')
   if (!response) return null
@@ -159,7 +165,20 @@ export async function fetchMe(): Promise<SakrylleMePayload | null> {
     return null
   }
   try {
-    return await response.json() as SakrylleMePayload
+    const me = await response.json() as SakrylleMePayload
+    // Merge OIDC id_token claims for identity fields when available.
+    // Balance/group/allowed_groups still come from /v1/me (real-time data).
+    if (OIDC_ENABLED) {
+      const token = getStoredToken()
+      if (token?.idTokenClaims) {
+        const claims = token.idTokenClaims
+        me.sub = me.sub ?? claims.sub
+        me.username = me.username ?? claims.name ?? claims.preferred_username
+        me.email = me.email ?? claims.email
+        me.email_verified = me.email_verified ?? claims.email_verified
+      }
+    }
+    return me
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'parse error'
     console.warn('Sakrylle /v1/me parse failed:', message)
@@ -177,9 +196,11 @@ export async function fetchBalance(): Promise<SakrylleBalance | null> {
     const me = await fetchMe()
     if (me === null) return null
     // /v1/me may not include group info — fall through to legacy endpoint if missing.
-    if (me.balance != null && me.user_id != null) {
+    // Accept either user_id (number) or sub (OIDC string) as valid identity.
+    const resolvedUserId = me.user_id ?? (me.sub ? Number(me.sub) : undefined)
+    if (me.balance != null && resolvedUserId != null) {
       return {
-        userId: me.user_id,
+        userId: resolvedUserId,
         username: me.username ?? '',
         creditRemaining: me.balance,
         currencyDisplay: me.currency_display ?? 'CNY',

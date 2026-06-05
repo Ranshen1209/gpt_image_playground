@@ -13,6 +13,7 @@ vi.mock('./sakrylleAuth', () => {
     __getToken() {
       return state.token
     },
+    OIDC_ENABLED: false,
     getStoredToken: () => state.token,
     refreshIfNeeded: vi.fn(async () => state.token),
     forceRefreshToken: vi.fn(async () => state.token),

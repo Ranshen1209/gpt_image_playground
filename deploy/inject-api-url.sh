@@ -24,6 +24,15 @@ find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_AP
 find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_DOCKER_DEPLOYMENT_PLACEHOLDER__|true|g" {} +
 find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_DOCKER_LEGACY_API_URL_USED_PLACEHOLDER__|$DOCKER_LEGACY_API_URL_USED|g" {} +
 
+# Sakrylle OAuth / OIDC 配置注入
+OAUTH_BASE=${OAUTH_BASE:-https://sub.sakrylle.com}
+OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-sakrylle-image-playground}
+OIDC_ENABLED=${OIDC_ENABLED:-false}
+
+find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OAUTH_BASE_PLACEHOLDER__|$OAUTH_BASE|g" {} +
+find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OAUTH_CLIENT_ID_PLACEHOLDER__|$OAUTH_CLIENT_ID|g" {} +
+find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OIDC_ENABLED_PLACEHOLDER__|$OIDC_ENABLED|g" {} +
+
 # 检查是否启用了 API 代理
 if [ "$ENABLE_API_PROXY" != "true" ]; then
     # 删除代理配置块

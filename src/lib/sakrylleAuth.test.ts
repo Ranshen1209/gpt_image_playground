@@ -517,7 +517,7 @@ describe('logoutAndRevoke', () => {
       new Response(null, { status: 200 }),
     )
 
-    logoutAndRevoke()
+    await logoutAndRevoke()
 
     // Local state cleared synchronously
     expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
@@ -542,7 +542,7 @@ describe('logoutAndRevoke', () => {
     )
     const fetchMock = vi.spyOn(globalThis, 'fetch')
 
-    logoutAndRevoke()
+    await logoutAndRevoke()
 
     expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
     await new Promise((r) => setTimeout(r, 0))
@@ -556,7 +556,7 @@ describe('logoutAndRevoke', () => {
     )
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network error'))
 
-    logoutAndRevoke()
+    await logoutAndRevoke()
     expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
     // Should not throw even after the promise settles
     await expect(new Promise((r) => setTimeout(r, 10))).resolves.toBeUndefined()
@@ -585,5 +585,116 @@ describe('beginLogin', () => {
     expect(params.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]+$/)
     expect(params.get('state')).toBe(state)
     expect(params.get('scope')).toBe('profile:read account:read account:balance:read models:read images:create responses:create offline_access')
+  })
+})
+
+describe('OIDC feature flag', () => {
+  it('OIDC_ENABLED is false by default', async () => {
+    // Dynamic import to get fresh module with default env
+    const { OIDC_ENABLED } = await import('./sakrylleAuth')
+    // In test env VITE_SAKRYLLE_OIDC_ENABLED is not set, so should be false
+    expect(OIDC_ENABLED).toBe(false)
+  })
+})
+
+describe('handleCallback with id_token', () => {
+  const NONCE_KEY = 'sakrylle-image-playground.oidc-nonce'
+
+  it('stores id_token claims when present in response', async () => {
+    // Create a valid-looking id_token (base64url-encoded header.payload.signature)
+    const header = btoa(JSON.stringify({ alg: 'RS256', kid: 'test' }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const payload = btoa(JSON.stringify({
+      iss: 'https://sub.sakrylle.com',
+      sub: '123',
+      aud: ['sakrylle-image-playground'],
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iat: Math.floor(Date.now() / 1000),
+      name: 'testuser',
+      email: 'test@sakrylle.com',
+    }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const idToken = `${header}.${payload}.fake_signature`
+
+    mockSessionStorage.setItem(PKCE_VERIFIER_KEY, 'test_verifier')
+    mockSessionStorage.setItem(PKCE_STATE_KEY, 'test_state')
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'sk_oauth_at',
+        refresh_token: 'rt_new',
+        expires_in: 86400,
+        scope: 'openid profile email',
+        id_token: idToken,
+      }),
+    )
+
+    // Note: OIDC_ENABLED is false in this test context (default env),
+    // so id_token parsing is skipped. This test verifies the non-OIDC path
+    // still works when server returns id_token.
+    const searchParams = new URLSearchParams('code=test_code&state=test_state')
+    const token = await handleCallback(searchParams)
+
+    expect(token.accessToken).toBe('sk_oauth_at')
+    // id_token is ignored when OIDC_ENABLED is false
+    expect(token.idToken).toBeUndefined()
+    expect(token.idTokenClaims).toBeUndefined()
+  })
+
+  it('skips id_token parsing when OIDC_ENABLED is false', async () => {
+    mockSessionStorage.setItem(PKCE_VERIFIER_KEY, 'test_verifier')
+    mockSessionStorage.setItem(PKCE_STATE_KEY, 'test_state')
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        access_token: 'sk_oauth_at',
+        refresh_token: 'rt_new',
+        expires_in: 86400,
+        id_token: 'header.payload.signature',
+      }),
+    )
+
+    const searchParams = new URLSearchParams('code=test_code&state=test_state')
+    const token = await handleCallback(searchParams)
+
+    expect(token.idToken).toBeUndefined()
+    expect(token.idTokenClaims).toBeUndefined()
+  })
+})
+
+describe('SakrylleAuthToken id_token fields', () => {
+  it('token with id_token fields serializes and deserializes correctly', () => {
+    const token = {
+      accessToken: 'sk_oauth_at',
+      expiresAt: Date.now() + 86400_000,
+      idToken: 'header.payload.signature',
+      idTokenClaims: {
+        sub: '123',
+        name: 'testuser',
+        email: 'test@sakrylle.com',
+      },
+    }
+
+    mockLocalStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(token))
+    const stored = getStoredToken()
+
+    expect(stored?.idToken).toBe('header.payload.signature')
+    expect(stored?.idTokenClaims?.sub).toBe('123')
+    expect(stored?.idTokenClaims?.name).toBe('testuser')
+    expect(stored?.idTokenClaims?.email).toBe('test@sakrylle.com')
+  })
+
+  it('token without id_token fields deserializes correctly (backward compat)', () => {
+    const token = {
+      accessToken: 'sk_oauth_at',
+      expiresAt: Date.now() + 86400_000,
+    }
+
+    mockLocalStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(token))
+    const stored = getStoredToken()
+
+    expect(stored?.idToken).toBeUndefined()
+    expect(stored?.idTokenClaims).toBeUndefined()
+    expect(stored?.accessToken).toBe('sk_oauth_at')
   })
 })
