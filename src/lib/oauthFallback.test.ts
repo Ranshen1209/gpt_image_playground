@@ -5,6 +5,7 @@ import * as sakrylleAuth from './sakrylleAuth'
 import * as sakrylleAccount from './sakrylleAccount'
 
 vi.mock('./sakrylleAuth', () => ({
+  OIDC_ENABLED: false,
   getStoredToken: vi.fn(),
   refreshIfNeeded: vi.fn(),
   refreshWithGroupId: vi.fn(),

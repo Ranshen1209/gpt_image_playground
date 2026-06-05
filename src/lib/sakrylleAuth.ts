@@ -5,22 +5,42 @@
 // Legacy v1 aliases (image_generation, balance:read) remain accepted during the deprecation window.
 
 import i18n from './i18n'
+import { getDiscoveryEndpoints } from './sakrylleOidcDiscovery'
 import { readRuntimeEnv } from './runtimeEnv'
 
 const OAUTH_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_BASE) || 'https://sub.sakrylle.com'
 const CLIENT_ID = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_CLIENT_ID) || 'sakrylle-image-playground'
+
+/** Feature flag: when 'true', enable OIDC (openid scope + id_token + Discovery). Default false. */
+export const OIDC_ENABLED = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OIDC_ENABLED) === 'true'
+
 // v2 canonical scopes — ONE token grants access to both Images API and Responses API.
 // offline_access is required to receive a refresh token.
 // profile:read enables /v1/me user info endpoint.
 // account:read enables allowed_groups, current_group in /v1/me (needed for group selection).
-const SCOPE = 'profile:read account:read account:balance:read models:read images:create responses:create offline_access'
+const V2_SCOPES = 'profile:read account:read account:balance:read models:read images:create responses:create offline_access'
+const OIDC_SCOPES = 'openid profile email'
+const SCOPE = OIDC_ENABLED ? `${OIDC_SCOPES} ${V2_SCOPES}` : V2_SCOPES
 
 const AUTH_STORAGE_KEY = 'sakrylle-image-playground.auth'
 const PKCE_VERIFIER_KEY = 'sakrylle-image-playground.pkce-verifier'
 const PKCE_STATE_KEY = 'sakrylle-image-playground.pkce-state'
+const NONCE_KEY = 'sakrylle-image-playground.oidc-nonce'
 
 const REFRESH_LEAD_TIME_MS = 60_000
 const DEFAULT_TOKEN_TTL_SECONDS = 86_400
+
+export interface IdTokenClaims {
+  sub: string
+  name?: string
+  email?: string
+  email_verified?: boolean
+  preferred_username?: string
+  nonce?: string
+  iss?: string
+  aud?: string | string[]
+  exp?: number
+}
 
 export interface SakrylleAuthToken {
   accessToken: string
@@ -38,6 +58,10 @@ export interface SakrylleAuthToken {
   }>
   /** Primary token's group info */
   group?: { id: number; name: string }
+  /** OIDC id_token (raw JWT string). Only present when OIDC_ENABLED and server returns it. */
+  idToken?: string
+  /** Decoded id_token payload claims. Only present when id_token was successfully parsed. */
+  idTokenClaims?: IdTokenClaims
 }
 
 interface OAuthGroupPayload {
@@ -62,6 +86,8 @@ interface OAuthTokenResponse {
     scope?: string
     group?: OAuthGroupPayload
   }>
+  /** OIDC id_token — only present when scope includes 'openid'. */
+  id_token?: string
 }
 
 export function getRedirectUri(): string {
@@ -92,6 +118,32 @@ function generateState(): string {
   const random = new Uint8Array(16)
   crypto.getRandomValues(random)
   return base64UrlEncode(random.buffer)
+}
+
+function generateNonce(): string {
+  const random = new Uint8Array(16)
+  crypto.getRandomValues(random)
+  return base64UrlEncode(random.buffer)
+}
+
+/** Decode id_token JWT payload (base64url) without signature verification. */
+function decodeIdTokenPayload(idToken: string): IdTokenClaims | null {
+  try {
+    const parts = idToken.split('.')
+    if (parts.length !== 3) return null
+    const raw = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+    const claims = JSON.parse(raw) as IdTokenClaims
+    if (!claims.sub || !claims.iss) return null
+    if (claims.exp && Date.now() / 1000 >= claims.exp) return null
+    // aud check: may be string or string[]
+    if (claims.aud) {
+      const auds = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
+      if (!auds.includes(CLIENT_ID)) return null
+    }
+    return claims
+  } catch {
+    return null
+  }
 }
 
 function parseGroupId(group: OAuthGroupPayload | { id?: number; name?: string } | undefined): number | undefined {
@@ -233,6 +285,14 @@ export async function beginLogin(): Promise<void> {
   sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier)
   sessionStorage.setItem(PKCE_STATE_KEY, state)
 
+  let authorizationEndpoint = `${OAUTH_BASE}/oauth/authorize`
+  if (OIDC_ENABLED) {
+    const discovery = await getDiscoveryEndpoints()
+    authorizationEndpoint = discovery.authorizationEndpoint
+    const nonce = generateNonce()
+    sessionStorage.setItem(NONCE_KEY, nonce)
+  }
+
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     redirect_uri: getRedirectUri(),
@@ -242,7 +302,11 @@ export async function beginLogin(): Promise<void> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
   })
-  window.location.href = `${OAUTH_BASE}/oauth/authorize?${params.toString()}`
+  if (OIDC_ENABLED) {
+    const nonce = sessionStorage.getItem(NONCE_KEY)
+    if (nonce) params.set('nonce', nonce)
+  }
+  window.location.href = `${authorizationEndpoint}?${params.toString()}`
 }
 
 export async function handleCallback(searchParams: URLSearchParams): Promise<SakrylleAuthToken> {
@@ -270,7 +334,12 @@ export async function handleCallback(searchParams: URLSearchParams): Promise<Sak
     client_id: CLIENT_ID,
     code_verifier: verifier,
   })
-  const response = await fetch(`${OAUTH_BASE}/oauth/token`, {
+  let tokenEndpoint = `${OAUTH_BASE}/oauth/token`
+  if (OIDC_ENABLED) {
+    const discovery = await getDiscoveryEndpoints()
+    tokenEndpoint = discovery.tokenEndpoint
+  }
+  const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -285,6 +354,24 @@ export async function handleCallback(searchParams: URLSearchParams): Promise<Sak
   const payload = await response.json() as OAuthTokenResponse
   // docs §2.1 — authorization_code grant must return refresh_token.
   const token = tokenFromPayload(payload, { requireRefresh: true })
+
+  // OIDC: parse id_token and verify nonce
+  if (OIDC_ENABLED && payload.id_token) {
+    const claims = decodeIdTokenPayload(payload.id_token)
+    if (claims) {
+      const expectedNonce = sessionStorage.getItem(NONCE_KEY)
+      if (expectedNonce && claims.nonce !== expectedNonce) {
+        console.warn('OIDC nonce mismatch — falling back to /v1/me for identity')
+      } else {
+        token.idToken = payload.id_token
+        token.idTokenClaims = claims
+      }
+    } else {
+      console.warn('OIDC id_token decode failed — falling back to /v1/me for identity')
+    }
+  }
+  sessionStorage.removeItem(NONCE_KEY)
+
   saveToken(token)
   return token
 }
@@ -312,6 +399,7 @@ export function logout(): void {
   window.localStorage.removeItem(AUTH_STORAGE_KEY)
   window.sessionStorage.removeItem(PKCE_VERIFIER_KEY)
   window.sessionStorage.removeItem(PKCE_STATE_KEY)
+  window.sessionStorage.removeItem(NONCE_KEY)
 }
 
 // RFC 7009 token revocation — docs §9.
@@ -334,9 +422,27 @@ async function revokeToken(token: string, hint: 'refresh_token' | 'access_token'
 }
 
 // Revoke the stored refresh token (preferred) then clear local state.
+// When OIDC_ENABLED, attempts RP-Initiated Logout via end_session_endpoint.
 // Fire-and-forget: UI should not wait for the network call.
-export function logoutAndRevoke(): void {
+export async function logoutAndRevoke(): Promise<void> {
   const token = getStoredToken()
+
+  // OIDC RP-Initiated Logout: redirect to IdP end_session_endpoint
+  if (OIDC_ENABLED && token?.idToken) {
+    try {
+      const discovery = await getDiscoveryEndpoints()
+      if (discovery.endSessionEndpoint) {
+        const postLogoutUri = getRedirectUri().replace('/oauth/callback', '/')
+        const url = `${discovery.endSessionEndpoint}?id_token_hint=${encodeURIComponent(token.idToken)}&post_logout_redirect_uri=${encodeURIComponent(postLogoutUri)}`
+        logout()
+        window.location.href = url
+        return
+      }
+    } catch {
+      // Discovery failed — fall through to local logout + revoke
+    }
+  }
+
   logout()
   if (token?.refreshToken) {
     void revokeToken(token.refreshToken, 'refresh_token')
@@ -362,7 +468,12 @@ async function performRefresh(token: SakrylleAuthToken): Promise<SakrylleAuthTok
       refresh_token: token.refreshToken,
       client_id: CLIENT_ID,
     })
-    const response = await fetch(`${OAUTH_BASE}/oauth/token`, {
+    let tokenEndpoint = `${OAUTH_BASE}/oauth/token`
+    if (OIDC_ENABLED) {
+      const discovery = await getDiscoveryEndpoints()
+      tokenEndpoint = discovery.tokenEndpoint
+    }
+    const response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
@@ -378,6 +489,19 @@ async function performRefresh(token: SakrylleAuthToken): Promise<SakrylleAuthTok
       previousRefreshTokenExpiresAt: token.refreshTokenExpiresAt,
       previousToken: token,
     })
+    // OIDC: if server returns a new id_token on refresh, update claims.
+    // Otherwise preserve existing claims (identity doesn't change on refresh).
+    if (OIDC_ENABLED && payload.id_token) {
+      const claims = decodeIdTokenPayload(payload.id_token)
+      if (claims) {
+        next.idToken = payload.id_token
+        next.idTokenClaims = claims
+      }
+    } else if (token.idToken) {
+      // Preserve existing id_token across refresh
+      next.idToken = token.idToken
+      next.idTokenClaims = token.idTokenClaims
+    }
     saveToken(next)
     return next
   } catch {

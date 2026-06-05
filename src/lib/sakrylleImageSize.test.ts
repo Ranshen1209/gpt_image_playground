@@ -6,6 +6,7 @@ vi.mock('./sakrylleAuth', () => {
   const state: { token: any } = { token: null }
   return {
     __esModule: true,
+    OIDC_ENABLED: false,
     __setToken(value: any) { state.token = value },
     getStoredToken: () => state.token,
   }
