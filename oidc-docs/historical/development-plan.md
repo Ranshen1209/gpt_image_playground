@@ -5,6 +5,8 @@ scope: product-local
 last_verified: 2026-06-06
 ---
 
+> **Historical note (2026-06-06):** This plan was preserved as the original upgrade plan. Image-side OIDC client implementation, group refresh discovery routing, and Docker runtime env injection have since landed. Use `../implementation-status.md`, `../local-integration.md`, and current code for live status.
+
 # 51 · Sakrylle Image — OAuth2 → OIDC 升级方案
 
 > **🎉 更新（2026-06-04）**：OIDC 基座（文档 03）已完整实现！本文档作为 client 侧升级方案保留，所有 IdP 侧依赖已消除。

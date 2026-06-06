@@ -180,11 +180,14 @@ export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: Sak
   if (!groups.length) return []
 
   if (apiMode === 'images') {
-    const namedImageGroups = groups.filter(groupNameLooksImage)
-    if (namedImageGroups.length) return namedImageGroups
-
     const capabilityGroups = groups.filter((group) => groupSupportsModeByCapability(group, apiMode))
-    return capabilityGroups.length ? capabilityGroups : groups
+    if (capabilityGroups.length) return capabilityGroups
+
+    const namedImageGroups = groups.filter((group) => {
+      const capabilities = group.capabilities ?? []
+      return !capabilities.length && groupNameLooksImage(group)
+    })
+    return namedImageGroups.length ? namedImageGroups : []
   }
 
   const namedResponsesGroups = groups.filter(groupNameLooksResponses)
@@ -206,7 +209,7 @@ export function resolveSelectedGroupId(apiMode: 'images' | 'responses', groups: 
   const selected = getSelectedGroups()[apiMode]
   const candidates = getGroupsForApiMode(apiMode, groups)
   if (selected && candidates.some((group) => group.id === selected)) return selected
-  return candidates[0]?.id ?? (apiMode === 'images' ? groups[0]?.id : undefined)
+  return candidates[0]?.id
 }
 
 /** Get available groups from the stored OAuth token (synchronous). */

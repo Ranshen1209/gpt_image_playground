@@ -5,6 +5,8 @@ scope: product-local
 last_verified: 2026-06-06
 ---
 
+> **Historical note (2026-06-06):** This research snapshot predates the completed Image-side OIDC client work and Docker runtime env injection. Treat its gap tables as historical context only; use `../implementation-status.md`, `../local-integration.md`, and current code for live status.
+
 # Sakrylle Image 现状调研报告
 
 > 文档编号: 50 | 状态: 调研完成 | 日期: 2026-06-03
