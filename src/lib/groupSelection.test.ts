@@ -168,13 +168,34 @@ describe('getGroupsForApiMode', () => {
     expect(resolveSelectedGroupId('responses', groups)).toBeUndefined()
   })
 
-  it('does not treat generic fallback group names as Responses candidates', () => {
+  it('does not use responses-only groups as an Images fallback', () => {
+    const groups = [
+      { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
+    ]
+
+    expect(getGroupsForApiMode('images', groups)).toEqual([])
+    expect(resolveSelectedGroupId('images', groups)).toBeUndefined()
+  })
+
+  it('does not use generic fallback group names as Images candidates', () => {
     const groups = [
       { id: 11, name: 'Group 11' },
     ]
 
-    expect(getGroupsForApiMode('responses', groups)).toEqual([])
-    expect(resolveSelectedGroupId('responses', groups)).toBeUndefined()
+    expect(getGroupsForApiMode('images', groups)).toEqual([])
+    expect(resolveSelectedGroupId('images', groups)).toBeUndefined()
+  })
+
+  it('uses capability over image-looking names for Images candidates', () => {
+    const groups = [
+      { id: 5, name: 'GPT-Image', capabilities: ['responses:create'] },
+      { id: 11, name: 'Group 11', capabilities: ['images:create'] },
+    ]
+
+    expect(getGroupsForApiMode('images', groups)).toEqual([
+      { id: 11, name: 'Group 11', capabilities: ['images:create'] },
+    ])
+    expect(resolveSelectedGroupId('images', groups)).toBe(11)
   })
 })
 

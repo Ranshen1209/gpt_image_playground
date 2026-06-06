@@ -422,8 +422,10 @@ async function revokeToken(token: string, hint: 'refresh_token' | 'access_token'
 }
 
 // Revoke the stored refresh token (preferred) then clear local state.
-// When OIDC_ENABLED, attempts RP-Initiated Logout via end_session_endpoint.
-// Fire-and-forget: UI should not wait for the network call.
+// When OIDC_ENABLED and an id_token is available, RP-Initiated Logout redirects
+// to the IdP end_session_endpoint after clearing local state. The redirect path
+// does not also revoke here; IdP session logout/token-family handling is owned
+// by the provider contract. Fallback paths still perform best-effort revoke.
 export async function logoutAndRevoke(): Promise<void> {
   const token = getStoredToken()
 
@@ -445,7 +447,7 @@ export async function logoutAndRevoke(): Promise<void> {
 
   logout()
   if (token?.refreshToken) {
-    void revokeToken(token.refreshToken, 'refresh_token')
+    await revokeToken(token.refreshToken, 'refresh_token')
   }
 }
 
@@ -544,7 +546,12 @@ export async function refreshWithGroupId(groupId: number): Promise<SakrylleAuthT
       client_id: CLIENT_ID,
       group_id: String(groupId),
     })
-    const response = await fetch(`${OAUTH_BASE}/oauth/token`, {
+    let tokenEndpoint = `${OAUTH_BASE}/oauth/token`
+    if (OIDC_ENABLED) {
+      const discovery = await getDiscoveryEndpoints()
+      tokenEndpoint = discovery.tokenEndpoint
+    }
+    const response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,

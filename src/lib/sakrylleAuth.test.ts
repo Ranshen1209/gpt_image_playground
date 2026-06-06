@@ -43,7 +43,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   vi.unstubAllGlobals()
+  vi.resetModules()
 })
 
 // Imports are hoisted, but they execute BEFORE any beforeEach runs. That is
@@ -489,6 +491,79 @@ describe('refreshWithGroupId', () => {
     const token = await refreshWithGroupId(4)
 
     expect(token?.group).toEqual({ id: 4, name: 'Group 4' })
+  })
+})
+
+describe('refreshWithGroupId with OIDC discovery', () => {
+  it('uses the discovery token endpoint when OIDC is enabled', async () => {
+    vi.stubEnv('VITE_SAKRYLLE_OIDC_ENABLED', 'true')
+    vi.resetModules()
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({
+        accessToken: 'old-token',
+        refreshToken: 'rt-old',
+        expiresAt: Date.now() + 60_000,
+        scope: 'images:create responses:create',
+      }),
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({
+        issuer: 'https://sub.sakrylle.com',
+        authorization_endpoint: 'https://sub.sakrylle.com/oauth/authorize',
+        token_endpoint: 'https://sub.sakrylle.com/oidc/token',
+        userinfo_endpoint: 'https://sub.sakrylle.com/v1/me',
+        end_session_endpoint: 'https://sub.sakrylle.com/oauth/logout',
+        jwks_uri: 'https://sub.sakrylle.com/.well-known/jwks.json',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        access_token: 'new-9',
+        refresh_token: 'rt-new',
+        expires_in: 3600,
+        group: { id: 9, name: 'GPT-Pro' },
+      }))
+
+    const { refreshWithGroupId: refreshWithGroupIdWithOidc } = await import('./sakrylleAuth')
+    const token = await refreshWithGroupIdWithOidc(9)
+
+    expect(token?.accessToken).toBe('new-9')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://sub.sakrylle.com/.well-known/openid-configuration')
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://sub.sakrylle.com/oidc/token')
+    const body = new URLSearchParams(fetchMock.mock.calls[1][1]?.body as string)
+    expect(body.get('group_id')).toBe('9')
+  })
+
+  it('redirects to the discovery end_session_endpoint when an id_token is stored', async () => {
+    vi.stubEnv('VITE_SAKRYLLE_OIDC_ENABLED', 'true')
+    vi.resetModules()
+    mockLocalStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({
+        accessToken: 'old-token',
+        refreshToken: 'rt-old',
+        expiresAt: Date.now() + 60_000,
+        idToken: 'header.payload.signature',
+      }),
+    )
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
+      issuer: 'https://sub.sakrylle.com',
+      authorization_endpoint: 'https://sub.sakrylle.com/oauth/authorize',
+      token_endpoint: 'https://sub.sakrylle.com/oauth/token',
+      userinfo_endpoint: 'https://sub.sakrylle.com/v1/me',
+      end_session_endpoint: 'https://sub.sakrylle.com/oauth/logout',
+      jwks_uri: 'https://sub.sakrylle.com/.well-known/jwks.json',
+    }))
+
+    const { logoutAndRevoke: logoutAndRevokeWithOidc } = await import('./sakrylleAuth')
+    await logoutAndRevokeWithOidc()
+
+    expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockLocation.href).toContain('https://sub.sakrylle.com/oauth/logout?')
+    const logoutUrl = new URL(mockLocation.href)
+    expect(logoutUrl.searchParams.get('id_token_hint')).toBe('header.payload.signature')
+    expect(logoutUrl.searchParams.get('post_logout_redirect_uri')).toBe(`${REDIRECT_ORIGIN}/`)
   })
 })
 

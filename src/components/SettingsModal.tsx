@@ -22,7 +22,7 @@ import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboar
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
 import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId, getGroupsForApiMode } from '../lib/groupSelection'
-import { fetchAllModels, fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
+import { fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
@@ -186,8 +186,10 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
   placeholder: string
   mode: 'images' | 'responses'
 }) {
+  const { t } = useTranslation()
   const [models, setModels] = useState<SakrylleModel[]>([])
   const [loading, setLoading] = useState(true)
+  const [modelError, setModelError] = useState<string | null>(null)
   const loggedIn = Boolean(sakrylleGetStoredToken())
   const latestValueRef = useRef(value)
   const latestOnChangeRef = useRef(onChange)
@@ -198,9 +200,14 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
   }, [value, onChange])
 
   useEffect(() => {
-    if (!loggedIn) { setLoading(false); return }
+    if (!loggedIn) {
+      setModelError(null)
+      setLoading(false)
+      return
+    }
     let cancelled = false
     setLoading(true)
+    setModelError(null)
     setModels([])
     ;(async () => {
       // Resolve which group this selector lists models for. On first login
@@ -208,10 +215,21 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
       // before choosing the default and fetching that group's models.
       const groupId = await ensureSelectedGroupId(mode)
       if (cancelled) return
+      if (!groupId) {
+        setModelError(t('settings.api.modelGroupMissing'))
+        setLoading(false)
+        return
+      }
       // Query /v1/models with THAT group's own access token — no token rotation,
-      // so Images + Responses selectors never race on refreshWithGroupId.
-      const accessToken = getGroupAccessToken(groupId)
-      const result = accessToken ? await fetchModelsWithToken(accessToken) : await fetchAllModels()
+      // so Images + Responses selectors never race on refreshWithGroupId. Do not
+      // fall back to the primary token: it may belong to a different group.
+      const accessToken = getGroupAccessToken(groupId, { allowFallback: false })
+      if (!accessToken) {
+        setModelError(t('settings.api.modelGroupTokenMissing'))
+        setLoading(false)
+        return
+      }
+      const result = await fetchModelsWithToken(accessToken)
       if (cancelled) return
       const seenModelIds = new Set<string>()
       const filtered = (filterImage
@@ -234,11 +252,12 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
     })().catch(() => {
       if (!cancelled) {
         setModels([])
+        setModelError(t('settings.api.modelLoadFailed'))
         setLoading(false)
       }
     })
     return () => { cancelled = true }
-  }, [loggedIn, filterImage, mode])
+  }, [loggedIn, filterImage, mode, t])
 
   if (!loggedIn || loading) {
     return (
@@ -249,6 +268,23 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
         placeholder={placeholder}
         className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
       />
+    )
+  }
+
+  if (modelError) {
+    return (
+      <div className="space-y-1.5">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          type="text"
+          placeholder={placeholder}
+          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-[#b9a9da] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-[#9181bd]/50"
+        />
+        <div className="text-xs text-amber-600 dark:text-amber-300">
+          {modelError}
+        </div>
+      </div>
     )
   }
 
@@ -330,6 +366,7 @@ export default function SettingsModal() {
   const [copyImportUrlProfile, setCopyImportUrlProfile] = useState<ApiProfile | null>(null)
   const [copyImportUrlOptions, setCopyImportUrlOptions] = useState<CopyImportUrlOptions>(readCopyImportUrlOptions)
   const [sakrylleLoggedIn, setSakrylleLoggedIn] = useState(() => Boolean(sakrylleGetStoredToken()))
+  const [sakrylleLoggingOut, setSakrylleLoggingOut] = useState(false)
 
   useEffect(() => {
     if (!showSettings) return
@@ -345,6 +382,19 @@ export default function SettingsModal() {
     window.addEventListener('storage', handleStorage)
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
+
+  const handleSakrylleLogout = useCallback(async () => {
+    if (sakrylleLoggingOut) return
+    setSakrylleLoggingOut(true)
+    try {
+      await sakrylleLogout()
+      setSakrylleLoggedIn(false)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : t('settings.api.sakrylleLogoutFailed'), 'error')
+    } finally {
+      setSakrylleLoggingOut(false)
+    }
+  }, [sakrylleLoggingOut, showToast, t])
 
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
@@ -1339,10 +1389,11 @@ export default function SettingsModal() {
                     <span className="text-gray-700 dark:text-gray-200">{t('settings.api.sakrylleLoggedIn')}</span>
                     <button
                       type="button"
-                      onClick={() => { sakrylleLogout(); setSakrylleLoggedIn(false) }}
-                      className="text-xs text-gray-500 underline hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      onClick={() => { void handleSakrylleLogout() }}
+                      disabled={sakrylleLoggingOut}
+                      className="text-xs text-gray-500 underline transition hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
                     >
-                      {t('settings.api.sakrylleLogout')}
+                      {sakrylleLoggingOut ? t('settings.api.sakrylleLoggingOut') : t('settings.api.sakrylleLogout')}
                     </button>
                   </div>
                 ) : (
