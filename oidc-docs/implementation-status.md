@@ -8,9 +8,18 @@ last_verified: 2026-06-06
 
 # Sakrylle Image Implementation Status
 
-Current documentation status: **client implementation complete enough for local verification; production enablement still depends on explicit deployment flags and smoke tests.**
+Current documentation status: **client implementation is complete and locally verified with automated tests/build; changes have been committed and pushed on `theme/sakrylle`; production enablement still depends on explicit deployment flags and deployed IdP smoke tests.**
 
 Canonical platform status lives in [Sakrylle OIDC current state](../../sub2api/sakrylle-docs/10-platform-identity/current-state.md). This file only tracks product-local readiness and gaps for the Image SPA.
+
+## Current repository progress (2026-06-06)
+
+- OIDC/group routing/branding documentation polish has been implemented on `theme/sakrylle` and pushed in commit `a868c7d` (`fix: complete Sakrylle OIDC and branding polish`).
+- Local automated verification completed before the commit:
+  - targeted Vitest suite: `src/lib/sakrylleAuth.test.ts`, `src/lib/groupSelection.test.ts`, `src/lib/oauthFallback.test.ts`, `src/locales/locales.test.ts` — 80 tests passed.
+  - full `npm run test` — 285 tests passed across 20 test files.
+  - `npm run build` — build succeeded with known Vite warnings about `oauthFallback.ts` mixed static/dynamic import and large chunks.
+- Deployment-facing validation is still pending: production/staging `OIDC_ENABLED` env confirmation and real IdP smoke tests with single-group and multi-group accounts.
 
 ## Implemented locally
 
