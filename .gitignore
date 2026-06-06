@@ -2,7 +2,6 @@ node_modules/
 dist/
 dev-proxy.config.json
 .wrangler/
-CLAUDE.md
 .playwright-mcp/
 sakrylle-about.png
 sakrylle-home.png
