@@ -231,4 +231,3 @@ When changing OAuth/OIDC client behavior, `VITE_SAKRYLLE_*` envs,
 `OIDC_ENABLED`, token storage, discovery, nonce/id_token handling, logout/revoke,
 group routing, or Image rollout status, update local `oidc-docs/` in the same
 change and update center docs if the shared platform contract changes.
-

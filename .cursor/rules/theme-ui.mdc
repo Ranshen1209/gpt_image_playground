@@ -1,0 +1,39 @@
+---
+description: Monet purple rebrand, Liquid Glass utilities, FOUC prevention
+globs: src/index.css,index.html,src/lib/theme.ts,src/components/**,tailwind.config.js,public/manifest.webmanifest
+alwaysApply: false
+---
+
+# Sakrylle Theme & UI
+
+## Brand
+
+- Name: "Sakrylle 图像工坊"
+- Primary: Monet `#9181bd` (`--primary: 253 26% 62%`)
+- Logo: `src/components/icons.tsx::SakrylleLogo` — do not reintroduce `public/pwa-icon.svg`
+- `body` must keep `sakrylle-ambient` class (`index.html`)
+
+## Colors — no blue-*
+
+All Tailwind `blue-*` swept to Monet purple hex: `#f1edf8` / `#c4b8e0` / `#9181bd` / `#7d6cb0` / `#6e5fa6` / `#5b4d8e`. On upstream rebase, replace any new `blue-*` immediately.
+
+## Liquid Glass
+
+Use utilities from `src/index.css` `@layer utilities`: `.glass-panel`, `.glass-card`, `.glass-input-shell`, `.glass-button`, `.glass-button-primary`. Do not invent new `bg-white/X backdrop-blur` combos.
+
+## Theme switch
+
+`src/lib/theme.ts` — View Transition API circle reveal; `prefers-reduced-motion` → instant. Key: `sakrylle-image-playground.theme`.
+
+## FOUC prevention (do not break)
+
+`index.html` `<head>` inline IIFE **before** `<link>` tags: sync apply `dark` class + `<html lang>` from localStorage. Wrap storage/matchMedia in try/catch.
+
+## Removed features (keep removed)
+
+- PWA install prompt / `beforeinstallprompt`
+- `HelpModal.tsx` — deleted; rebase conflicts → keep deleted
+
+## Header behavior
+
+Balance poll every 60s when `document.visibilityState === 'visible'`; refresh on tab visible. Recharge → `https://sub.sakrylle.com/purchase`. About page must keep CookSleep upstream link + MIT license.
