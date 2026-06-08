@@ -1,0 +1,34 @@
+---
+description: i18next bilingual rules, locale parity, and persistence sentinels
+globs: src/locales/**,src/lib/i18n.ts,src/lib/language.ts,src/lib/agentSentinels.ts
+alwaysApply: false
+---
+
+# i18n (zh / en)
+
+i18next + react-i18next. Inline resources only (`src/locales/zh.json` + `en.json`). `fallbackLng: 'zh'`.
+
+## Adding strings
+
+1. Add key to `zh.json`, mirror in `en.json` (same position)
+2. Components: `useTranslation()` → `t('namespace.key')`
+3. Lib code: `import i18n from './i18n'` → `i18n.t('errors.x')`
+4. Variables: `{{name}}` placeholders
+5. **Do not translate** brand "Sakrylle" or tech terms (API, URL, API Key, token, OAuth)
+
+## Persistence rule (critical)
+
+Never store translated strings in IndexedDB / store for errors or agent state. Use sentinels from `agentSentinels.ts`:
+
+- `__sakrylle:agent_stopped__`
+- `__sakrylle:openai_interrupted__`
+
+Render via `renderAgentStopped` / `resolveErrorForDisplay` (handles zh/en legacy literals).
+
+## Tests
+
+`src/locales/locales.test.ts` enforces key parity, no empty strings (whitelist `Before/After/Prefix/Suffix`), placeholder matching.
+
+## Known hardcoded Chinese (intentional)
+
+`SettingsModal.tsx`: `'新配置'` / `'默认'` / `'（复制）'` — profile default names; migrations must stay compatible.

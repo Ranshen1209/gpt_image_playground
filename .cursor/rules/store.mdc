@@ -1,0 +1,37 @@
+---
+description: Zustand store architecture, persist keys, and image cache
+globs: src/store.ts,src/lib/db.ts,src/lib/agentApi.ts
+alwaysApply: false
+---
+
+# Store (Zustand 5)
+
+`src/store.ts` — central state. `persist` writes `AppSettings`, `tasks`, `agentConversations` to localStorage key `sakrylle-store`. Images/thumbnails in IndexedDB (`db.ts`).
+
+## State slices
+
+- `settings` — profiles, activeProfileId, apiMode, appMode
+- `tasks` — generation task records
+- `agentConversations` — Agent history
+- `input` — prompt, inputImages, maskDraft
+- `ui` — toasts, modals, agent draft, selected task
+
+## Core actions
+
+`submitTask`, `submitAgentMessage`, `retryTask`, `regenerateAgentAssistantMessage`, `exportData`/`importData`, `clearData`, `initStore`
+
+## Image cache (non-Zustand)
+
+- Memory LRU: `imageCache` (8 originals), `thumbnailCache` (80 thumbs)
+- Backfill via `requestIdleCallback`; `subscribeImageThumbnail(id, cb)` for components
+
+## Import chain
+
+store → db.ts / agentApi.ts / api.ts / openaiCompatibleImageApi.ts / groupSelection.ts / oauthFallback.ts / agentSentinels.ts
+
+## Agent notes
+
+- History in IndexedDB, not localStorage
+- Branch refs scoped to current path only
+- `ApiProfile.imageProfileId` delegates image generation to another Images profile
+- Stream markdown via `streamdown` — `tailwind.config.js` must include `node_modules/streamdown/dist/*.js`

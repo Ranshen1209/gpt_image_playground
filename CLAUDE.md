@@ -9,7 +9,7 @@ Sakrylle 图像生成站 fork of [CookSleep/gpt_image_playground](https://github
 在 Sakrylle 生态里的位置：用户在 [sub.sakrylle.com](https://sub.sakrylle.com) 通过 OAuth 2.0 PKCE 登录或申请 GPT-Image group API key，本站负责 UI / 历史 / 画廊 / 蒙版编辑器 / Agent 多轮对话。所有图像调用真正打 [api.sakrylle.com/v1/images/*](https://api.sakrylle.com)，再由 sub2api 转发到 `ai.centos.hk` 上游。
 
 - **Upstream**: [CookSleep/gpt_image_playground](https://github.com/CookSleep/gpt_image_playground) (MIT)
-- **Fork**: [Ranshen1209/gpt_image_playground](https://github.com/Ranshen1209/gpt_image_playground), 主线 `theme/sakrylle`
+- **Fork**: [Ranshen1209/sakrylle-image](https://github.com/Ranshen1209/sakrylle-image), 主线 `theme/sakrylle`
 - **生产域名**: `image.sakrylle.com`（OAuth redirect URI 已写死该域名 SSR fallback；挂同一 nginx + sslh 栈）
 - **状态**: v0.10.0 — Sakrylle 化、OAuth PKCE 登录、OIDC 发现、多 Group 切换、OAuth Bearer 回退、i18n 中英双语、Liquid Glass UI、View Transition 主题切换均已落地
 
@@ -235,9 +235,9 @@ git push origin theme/sakrylle
 git tag v0.X.Y && git push origin v0.X.Y
 
 # 3. 手动触发 GHA 构建（别等 tag 自动触发，它不工作）+ 等完成（约 1 分钟）
-gh workflow run docker.yml -R Ranshen1209/gpt_image_playground --ref theme/sakrylle
-sleep 6 && gh run list -R Ranshen1209/gpt_image_playground --workflow=docker.yml --limit=1
-gh run watch -R Ranshen1209/gpt_image_playground
+gh workflow run docker.yml -R Ranshen1209/sakrylle-image --ref theme/sakrylle
+sleep 6 && gh run list -R Ranshen1209/sakrylle-image --workflow=docker.yml --limit=1
+gh run watch -R Ranshen1209/sakrylle-image
 
 # 4. 服务器拉新镜像 + 重启
 ssh ssh-tokyo 'docker pull ghcr.io/ranshen1209/gpt_image_playground:latest && \

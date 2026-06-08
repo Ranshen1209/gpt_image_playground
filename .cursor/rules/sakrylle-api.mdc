@@ -1,0 +1,41 @@
+---
+description: Sakrylle API endpoints, models, auth paths, and env injection
+globs: src/lib/api*.ts,src/lib/sakrylleAccount.ts,src/lib/sakrylleImageSize.ts,src/lib/openaiCompatibleImageApi.ts,src/lib/oauthFallback.ts,src/lib/groupSelection.ts,src/vite-env.d.ts
+alwaysApply: false
+---
+
+# Sakrylle API Integration
+
+**Default baseUrl must be `https://api.sakrylle.com/v1`.** Paths append directly (normalized by `normalizeBaseUrl`).
+
+| Mode | Path | Purpose |
+|---|---|---|
+| Images | `POST images/generations` | Text-to-image |
+| Images | `POST images/edits` | Reference / mask edit (multipart) |
+| Responses | `POST responses` | Agent + streaming images |
+| Platform | `GET me` | User info / balance / groups (v2) |
+| Platform | `GET account/balance` | Legacy v1 fallback |
+| Platform | `GET models` | Model list (group-scoped) |
+
+## Auth paths
+
+1. **OAuth PKCE** (recommended) — token for platform API + OAuth Bearer fallback for images/responses
+2. **Manual API Key** — stored in IndexedDB profile
+
+**OAuth Bearer fallback** (`oauthFallback.ts`): only when logged in + Sakrylle official baseUrl + no explicit apiKey. Scopes: `images:create` or `image_generation` for Images; `responses:create` for Responses.
+
+**Multi-group** (`groupSelection.ts`): Images and Responses can use different groups. Persisted in `sakrylle-image-playground.selected-groups`.
+
+## Build-time env vars
+
+| Variable | Fallback |
+|---|---|
+| `VITE_DEFAULT_API_URL` | `https://api.sakrylle.com/v1` |
+| `VITE_SAKRYLLE_PLATFORM_API` | → `VITE_DEFAULT_API_URL` |
+| `VITE_SAKRYLLE_OAUTH_BASE` | `https://sub.sakrylle.com` |
+| `VITE_SAKRYLLE_OAUTH_CLIENT_ID` | `sakrylle-image-playground` |
+| `VITE_SAKRYLLE_OIDC_ENABLED` | `false` |
+
+Docker runtime injection via `deploy/inject-api-url.sh`. Production: browser connects directly to `api.sakrylle.com` (no container nginx proxy).
+
+Platform calls use `sakrylleAccount.ts::authedFetch` (401 retry + token injection).
