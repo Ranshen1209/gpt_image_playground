@@ -38,12 +38,15 @@ function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
 }
 
-/** 并发拆分子请求的最大同时在飞数 */
-const MAX_CONCURRENT_IMAGE_REQUESTS = 3
+/** 并发拆分子请求的最大同时在飞数。实测 api.sakrylle.com 单用户并发墙=6（7+ 触发 429
+ *  "Concurrency limit exceeded for user"），贴墙取 6 最大化吞吐又不撞限速 */
+const MAX_CONCURRENT_IMAGE_REQUESTS = 6
 /** 可重试错误的重试次数 */
 const IMAGE_REQUEST_MAX_RETRIES = 1
 /** 重试前的退避时长（毫秒） */
 const IMAGE_REQUEST_RETRY_DELAY_MS = 800
+/** "凑满 N" 的额外补发预算系数：最多额外补发 N 次（总请求 ≤ 2N），防止持续失败时无限烧钱 */
+const IMAGE_REQUEST_REFILL_BUDGET_FACTOR = 1
 
 /** worker-pool 并发限流：最多 limit 个同时在飞，结果按输入顺序返回 */
 export async function runWithConcurrency<T>(
@@ -98,16 +101,65 @@ export async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = IMAGE_
   }
 }
 
-/** 从并发结果聚合部分失败信息 */
+/** 从失败数 + 首个错误聚合部分失败信息（凑满 N 后仍有缺口时透出） */
 export function buildPartialFailure(
-  results: PromiseSettledResult<unknown>[],
-  successCount: number,
+  failedCount: number,
+  firstError: unknown,
 ): CallApiResult['partialFailure'] {
-  if (successCount === 0 || successCount === results.length) return undefined
-  const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-  const reason = firstError?.reason
-  const firstErrorMessage = reason instanceof Error ? reason.message : String(reason ?? '')
-  return { failedCount: results.length - successCount, firstErrorMessage }
+  if (failedCount <= 0) return undefined
+  const firstErrorMessage = firstError instanceof Error ? firstError.message : String(firstError ?? '')
+  return { failedCount, firstErrorMessage }
+}
+
+/**
+ * 拆分 + 凑满 N：上游 gpt-image-2 不支持单请求 n>1（实测忽略 n 永远回 1 张），
+ * 必须拆成 n 个 n:1 请求。失败的子请求（含 429 并发墙）补发直到凑满 N 张或耗尽补发预算。
+ * - 每个 slot 固定 [0, n-1]，补发复用失败 slot，保证预览槽位稠密不留空洞
+ * - 并发受 MAX_CONCURRENT_IMAGE_REQUESTS（贴网关并发墙）限流
+ * - 本轮全为不可重试失败（4xx/moderation）且无成功 → 立即停止（补发也没用，省钱）
+ * runSingle(slot) 必须自带 callWithRetry + 成功后 onPartialImage({final}) 推槽位
+ */
+export async function runImageRequestsWithRefill(
+  n: number,
+  runSingle: (slot: number) => Promise<CallApiResult>,
+): Promise<{ resultsBySlot: Array<CallApiResult | undefined>; failedCount: number; firstError: unknown }> {
+  const resultsBySlot = new Array<CallApiResult | undefined>(n).fill(undefined)
+  const maxAttempts = n + n * IMAGE_REQUEST_REFILL_BUDGET_FACTOR
+  let attempts = 0
+  let firstError: unknown
+
+  while (attempts < maxAttempts) {
+    const unfilledSlots: number[] = []
+    for (let slot = 0; slot < n; slot++) {
+      if (!resultsBySlot[slot]) unfilledSlots.push(slot)
+    }
+    if (unfilledSlots.length === 0) break
+
+    const batchSlots = unfilledSlots.slice(0, maxAttempts - attempts)
+    attempts += batchSlots.length
+
+    const results = await runWithConcurrency(
+      batchSlots.map((slot) => () => runSingle(slot)),
+      MAX_CONCURRENT_IMAGE_REQUESTS,
+    )
+
+    let roundSuccess = 0
+    let roundRetryable = 0
+    results.forEach((r, idx) => {
+      if (r.status === 'fulfilled') {
+        resultsBySlot[batchSlots[idx]] = r.value
+        roundSuccess++
+      } else {
+        if (firstError === undefined) firstError = r.reason
+        if (isRetryableError(r.reason)) roundRetryable++
+      }
+    })
+
+    // 本轮零成功且失败全不可重试 → 补发无意义，停止
+    if (roundSuccess === 0 && roundRetryable === 0) break
+  }
+
+  return { resultsBySlot, failedCount: resultsBySlot.filter((r) => !r).length, firstError }
 }
 
 /** 构造带 HTTP status 的错误（供 isRetryableError 分类） */
@@ -535,29 +587,24 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
       ...(profile.codexCli ? { quality: 'auto' as const } : {}),
     },
   }
-  const results = await runWithConcurrency(
-    Array.from({ length: n }).map((_, requestIndex) => () =>
-      callWithRetry(() => callImagesApiSingle({
-        ...singleOpts,
-        onPartialImage: opts.onPartialImage
-          ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
-          : undefined,
-      }, profile)).then((result) => {
-        // 子请求完成即把成品图推进对应预览槽位，无需等其余子请求
-        const finalImage = result.images[0]
-        if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex, final: true })
-        return result
-      })),
-    MAX_CONCURRENT_IMAGE_REQUESTS,
+  const { resultsBySlot, failedCount, firstError } = await runImageRequestsWithRefill(n, (slot) =>
+    callWithRetry(() => callImagesApiSingle({
+      ...singleOpts,
+      onPartialImage: opts.onPartialImage
+        ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex: slot })
+        : undefined,
+    }, profile)).then((result) => {
+      // 子请求完成即把成品图推进对应预览槽位，无需等其余子请求
+      const finalImage = result.images[0]
+      if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex: slot, final: true })
+      return result
+    }),
   )
 
-  const successfulResults = results
-    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
+  const successfulResults = resultsBySlot.filter((r): r is CallApiResult => Boolean(r))
 
   if (successfulResults.length === 0) {
-    const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-    if (firstError) throw firstError.reason
+    if (firstError) throw firstError
     throw new Error(i18n.t('errors.concurrentAllFailed'))
   }
 
@@ -573,7 +620,7 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
     successfulResults[0]?.actualParams ?? {},
     { n: images.length },
   )
-  const partialFailure = buildPartialFailure(results, successfulResults.length)
+  const partialFailure = buildPartialFailure(failedCount, firstError)
 
   return {
     images,
@@ -724,28 +771,23 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
     return callResponsesImageApiSingle(opts, profile)
   }
 
-  const results = await runWithConcurrency(
-    Array.from({ length: n }).map((_, requestIndex) => () =>
-      callWithRetry(() => callResponsesImageApiSingle({
-        ...opts,
-        onPartialImage: opts.onPartialImage
-          ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
-          : undefined,
-      }, profile)).then((result) => {
-        const finalImage = result.images[0]
-        if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex, final: true })
-        return result
-      })),
-    MAX_CONCURRENT_IMAGE_REQUESTS,
+  const { resultsBySlot, failedCount, firstError } = await runImageRequestsWithRefill(n, (slot) =>
+    callWithRetry(() => callResponsesImageApiSingle({
+      ...opts,
+      onPartialImage: opts.onPartialImage
+        ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex: slot })
+        : undefined,
+    }, profile)).then((result) => {
+      const finalImage = result.images[0]
+      if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex: slot, final: true })
+      return result
+    }),
   )
 
-  const successfulResults = results
-    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
+  const successfulResults = resultsBySlot.filter((r): r is CallApiResult => Boolean(r))
 
   if (successfulResults.length === 0) {
-    const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-    if (firstError) throw firstError.reason
+    if (firstError) throw firstError
     throw new Error(i18n.t('errors.concurrentAllFailed'))
   }
 
@@ -761,7 +803,7 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
     successfulResults[0]?.actualParams ?? {},
     images.length === opts.params.n ? { n: opts.params.n } : { n: images.length },
   )
-  const partialFailure = buildPartialFailure(results, successfulResults.length)
+  const partialFailure = buildPartialFailure(failedCount, firstError)
 
   return {
     images,

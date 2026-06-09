@@ -4074,6 +4074,7 @@ async function executeTask(taskId: string) {
     if (result.partialFailure) {
       useStore.getState().showToast(
         i18n.t('toast.generationPartialFailure', {
+          target: outputIds.length + result.partialFailure.failedCount,
           success: outputIds.length,
           failed: result.partialFailure.failedCount,
         }),
