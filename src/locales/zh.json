@@ -606,6 +606,7 @@
     "clipboardCopyFailed": "复制失败：{{reason}}",
     "openaiTimeout": "请求超时：超过 {{seconds}} 秒仍未完成，请稍后重试或提高超时时间。{{hint}}",
     "removedImageMention": "@已移除图片",
+    "timeoutHintChatOverall": "生成超过时限。可在设置里调高超时时长。",
     "timeoutHintStreaming": "也可尝试打开「流式传输」，并提高「请求中间步骤图像数」来维持连接。",
     "timeoutHintPartialZero": "官方流式接口不发送心跳，当前「请求中间步骤图像数」为 0，连接可能因无数据传输而断开。建议提高到 2 或 3。",
     "timeoutHintPartialLow": "也可尝试提高「请求中间步骤图像数」来维持连接，避免长时间无数据传输导致断开。",
