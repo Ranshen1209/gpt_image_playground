@@ -7,6 +7,7 @@ import {
   callImagesApiViaChat,
 } from './chatCompletionsImageApi'
 import { isRetryableError } from './openaiCompatibleImageApi'
+import { compressImageForUpload } from './canvasImage'
 import { createDefaultOpenAIProfile } from './apiProfiles'
 import { DEFAULT_PARAMS } from '../types'
 
@@ -15,6 +16,14 @@ vi.mock('./oauthFallback', () => ({
   canUseOAuthForProfile: vi.fn().mockReturnValue(false),
   resolveBearerToken: vi.fn().mockResolvedValue('sk-test'),
 }))
+
+// Preserve the real canvas helpers (openaiCompatibleImageApi imports some of
+// them) and only stub compressImageForUpload so we can assert the chat接入点
+// compresses inputs/mask before assembling content.
+vi.mock('./canvasImage', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./canvasImage')>()
+  return { ...real, compressImageForUpload: vi.fn() }
+})
 
 vi.mock('./devProxy', async (importOriginal) => {
   const real = await importOriginal<typeof import('./devProxy')>()
@@ -306,3 +315,67 @@ describe('callImagesApiViaChat idle timeout', () => {
     }
   }, 15_000)
 })
+
+// ---------------------------------------------------------------------------
+// spec §4 — input/mask compression at the chat接入点
+// ---------------------------------------------------------------------------
+
+describe('callImagesApiViaChat input compression', () => {
+  beforeEach(() => {
+    vi.mocked(compressImageForUpload).mockReset()
+    // Identity-prefixing stub so we can assert the compressed value reaches the body.
+    vi.mocked(compressImageForUpload).mockImplementation(async (url: string) => `compressed::${url}`)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('compresses each input image + the mask, and sends the compressed urls in the request body', async () => {
+    let body: { messages: { content: ChatPart[] }[] } | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url: string, init: { body: string }) => {
+        body = JSON.parse(init.body)
+        // No image in the stream -> callImagesApiViaChat rejects, but body is captured.
+        return sseResponse([chunk('no image here', 'stop')])
+      }),
+    )
+
+    const opts = {
+      ...makeOpts(),
+      inputImageDataUrls: ['data:image/png;base64,IN1', 'data:image/png;base64,IN2'],
+      maskDataUrl: 'data:image/png;base64,MASK',
+    }
+
+    await expect(callImagesApiViaChat(opts, makeProfile())).rejects.toBeTruthy()
+
+    expect(compressImageForUpload).toHaveBeenCalledWith('data:image/png;base64,IN1')
+    expect(compressImageForUpload).toHaveBeenCalledWith('data:image/png;base64,IN2')
+    expect(compressImageForUpload).toHaveBeenCalledWith('data:image/png;base64,MASK', { isMask: true })
+
+    const urls = (body?.messages[0].content ?? [])
+      .filter((p): p is Extract<ChatPart, { type: 'image_url' }> => p.type === 'image_url')
+      .map((p) => p.image_url.url)
+    expect(urls).toEqual([
+      'compressed::data:image/png;base64,IN1',
+      'compressed::data:image/png;base64,IN2',
+      'compressed::data:image/png;base64,MASK',
+    ])
+  })
+
+  it('does not call compressImageForUpload for a text-to-image request (no inputs, no mask)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(sseResponse([chunk('no image here', 'stop')])),
+    )
+
+    await expect(callImagesApiViaChat(makeOpts(), makeProfile())).rejects.toBeTruthy()
+    expect(compressImageForUpload).not.toHaveBeenCalled()
+  })
+})
+
+type ChatPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }

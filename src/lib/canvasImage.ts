@@ -54,6 +54,98 @@ export async function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png'
   })
 }
 
+export async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error ?? new Error('blob read failed'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Upload-time image compression (spec 2026-06-10-input-image-compression)
+//
+// Large input images (e.g. 8MP phone photos, ~7.5MB PNG -> ~9.5MB base64)
+// stall the streaming chat/completions path: the oversized request body makes
+// upstream processing so slow that heartbeat chunks arrive >60s apart and trip
+// the idle timeout. Downsampling + re-encoding before send shrinks the body so
+// upload + upstream processing are fast and heartbeats stay dense.
+//
+// This only touches the transient "copy we send" — store/db/history keep the
+// user's original image.
+// ---------------------------------------------------------------------------
+
+export const COMPRESS_MAX_DIMENSION = 1536
+/** Compares against dataUrl.length (base64 chars ≈ encoded bytes). 1.5M base64 ≈ ~1.1MB raw. */
+export const COMPRESS_TRIGGER_BYTES = 1_500_000
+/** JPEG quality for non-mask re-encoding; masks use PNG (no quality arg) to keep alpha. */
+export const COMPRESS_JPEG_QUALITY = 0.85
+
+export interface CompressImageOptions {
+  /** Masks must stay PNG (transparent area is semantic) and trigger on size only. */
+  isMask?: boolean
+}
+
+/** Injectable seam: the browser primitives have no real impl under node/jsdom tests. */
+export interface CompressImageDeps {
+  getImageDimensions: (dataUrl: string) => Promise<ImageDimensions>
+  loadImage: (dataUrl: string) => Promise<HTMLImageElement>
+  canvasToBlob: (canvas: HTMLCanvasElement, type?: string, quality?: number) => Promise<Blob>
+  blobToDataUrl: (blob: Blob) => Promise<string>
+  createCanvas: () => HTMLCanvasElement
+}
+
+const defaultCompressDeps: CompressImageDeps = {
+  getImageDimensions,
+  loadImage,
+  canvasToBlob,
+  blobToDataUrl,
+  createCanvas: () => document.createElement('canvas'),
+}
+
+/**
+ * Downsample + re-encode an input image before upload, but only when it is over
+ * threshold (small images return unchanged with zero re-encode cost). Compression
+ * is an optimization, never a blocker: any failure falls back to the original.
+ */
+export async function compressImageForUpload(
+  dataUrl: string,
+  options: CompressImageOptions = {},
+  deps: CompressImageDeps = defaultCompressDeps,
+): Promise<string> {
+  const { isMask = false } = options
+  try {
+    const { width, height } = await deps.getImageDimensions(dataUrl)
+    const longestEdge = Math.max(width, height)
+    const overSize = longestEdge > COMPRESS_MAX_DIMENSION
+    const overBytes = dataUrl.length > COMPRESS_TRIGGER_BYTES
+    // Mask: size only (a heavy-but-small mask must stay lossless PNG, untouched).
+    // Non-mask: size OR bytes (also catch in-bounds-but-heavy screenshots/PNGs).
+    const shouldCompress = isMask ? overSize : overSize || overBytes
+    if (!shouldCompress) return dataUrl
+
+    const image = await deps.loadImage(dataUrl)
+    const scale = Math.min(1, COMPRESS_MAX_DIMENSION / longestEdge)
+    const canvas = deps.createCanvas()
+    canvas.width = Math.round(width * scale)
+    canvas.height = Math.round(height * scale)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return dataUrl
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+    const mime = isMask ? 'image/png' : 'image/jpeg'
+    const quality = isMask ? undefined : COMPRESS_JPEG_QUALITY
+    const blob = await deps.canvasToBlob(canvas, mime, quality)
+    const compressed = await deps.blobToDataUrl(blob)
+
+    // Re-encoding can rarely grow the payload (tiny flat images). Never grow.
+    return compressed.length < dataUrl.length ? compressed : dataUrl
+  } catch {
+    return dataUrl
+  }
+}
+
 export async function validateMaskMatchesImage(maskDataUrl: string, imageDataUrl: string): Promise<MaskCoverage> {
   const [maskImage, sourceImage] = await Promise.all([loadImage(maskDataUrl), loadImage(imageDataUrl)])
   if (maskImage.naturalWidth !== sourceImage.naturalWidth || maskImage.naturalHeight !== sourceImage.naturalHeight) {

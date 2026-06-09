@@ -1,4 +1,5 @@
 import type { ApiProfile } from '../types'
+import { compressImageForUpload } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import i18n from './i18n'
 import {
@@ -108,11 +109,21 @@ export async function callImagesApiViaChat(opts: CallApiOptions, profile: ApiPro
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
   const requestHeaders = await createRequestHeaders(profile)
 
+  // Downsample + re-encode oversized inputs before send so the request body
+  // stays small (fast upload, dense heartbeats, no idle timeout). Transient —
+  // store/db/history keep the user's original image.
+  const compressedInputs = await Promise.all(
+    opts.inputImageDataUrls.map((url) => compressImageForUpload(url)),
+  )
+  const compressedMask = opts.maskDataUrl
+    ? await compressImageForUpload(opts.maskDataUrl, { isMask: true })
+    : undefined
+
   const body = {
     model: profile.model,
     stream: true,
     messages: [
-      { role: 'user', content: buildChatMessageContent(opts.prompt, opts.inputImageDataUrls, opts.maskDataUrl) },
+      { role: 'user', content: buildChatMessageContent(opts.prompt, compressedInputs, compressedMask) },
     ],
   }
 
