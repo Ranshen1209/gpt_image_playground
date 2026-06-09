@@ -26,6 +26,10 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
 
   const scope = token.scope ?? ''
   if (profile.apiMode === 'responses') return scope.includes('responses:create')
+  // The streaming chat/completions image path (default on Sakrylle since v0.10.3)
+  // hits POST chat/completions, gated server-side by chat.completions:create —
+  // a distinct scope from images:create. Base URL is already known to be Sakrylle.
+  if (profile.streamChatCompletionsImage === true) return scope.includes('chat.completions:create')
   return scope.includes('images:create') || scope.includes('image_generation')
 }
 

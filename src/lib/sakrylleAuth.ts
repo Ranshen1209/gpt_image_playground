@@ -18,7 +18,9 @@ export const OIDC_ENABLED = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OIDC_EN
 // offline_access is required to receive a refresh token.
 // profile:read enables /v1/me user info endpoint.
 // account:read enables allowed_groups, current_group in /v1/me (needed for group selection).
-const V2_SCOPES = 'profile:read account:read account:balance:read models:read images:create responses:create offline_access'
+// chat.completions:create is required by the streaming chat/completions image path
+// (default for Sakrylle since v0.10.3) — distinct from images:create.
+const V2_SCOPES = 'profile:read account:read account:balance:read models:read images:create responses:create chat.completions:create offline_access'
 const OIDC_SCOPES = 'openid profile email'
 const SCOPE = OIDC_ENABLED ? `${OIDC_SCOPES} ${V2_SCOPES}` : V2_SCOPES
 
