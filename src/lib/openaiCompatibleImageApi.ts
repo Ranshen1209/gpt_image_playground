@@ -72,9 +72,14 @@ export async function runWithConcurrency<T>(
   return results
 }
 
-/** 判定错误是否值得重试：超时（AbortError）、网络错误（TypeError）、429、5xx */
+/** 判定错误是否值得重试：空闲超时可重试，整体超时和用户取消不可重试 */
 export function isRetryableError(err: unknown): boolean {
-  if (err instanceof DOMException && err.name === 'AbortError') return true
+  // 空闲超时:上游卡死,重试可能换账号成功 → 可重试
+  if (err instanceof Error && err.name === 'IdleTimeout') return true
+  // 整体超时:有字节流动但到 600s,真太慢,重试只是再烧时间和钱 → 不可重试
+  if (err instanceof Error && err.name === 'OverallTimeout') return false
+  // 用户主动取消:绝不重试
+  if (err instanceof DOMException && err.name === 'AbortError') return false
   if (err instanceof TypeError) return true
   const status = (err as { httpStatus?: unknown } | null)?.httpStatus
   if (typeof status === 'number') {

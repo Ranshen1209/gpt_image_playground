@@ -44,8 +44,8 @@ describe('runWithConcurrency', () => {
 })
 
 describe('isRetryableError', () => {
-  it('超时 AbortError 可重试', () => {
-    expect(isRetryableError(new DOMException('aborted', 'AbortError'))).toBe(true)
+  it('用户取消 AbortError 不可重试', () => {
+    expect(isRetryableError(new DOMException('aborted', 'AbortError'))).toBe(false)
   })
   it('网络错误 TypeError 可重试', () => {
     expect(isRetryableError(new TypeError('Failed to fetch'))).toBe(true)
@@ -66,6 +66,32 @@ describe('isRetryableError', () => {
   })
   it('无 status 的普通错误不可重试', () => {
     expect(isRetryableError(new Error('whatever'))).toBe(false)
+  })
+})
+
+describe('isRetryableError abort 三拆分', () => {
+  it('idle timeout is retryable', () => {
+    const err = new Error('idle')
+    err.name = 'IdleTimeout'
+    expect(isRetryableError(err)).toBe(true)
+  })
+  it('overall timeout is NOT retryable', () => {
+    const err = new Error('overall')
+    err.name = 'OverallTimeout'
+    expect(isRetryableError(err)).toBe(false)
+  })
+  it('user abort (AbortError) is NOT retryable', () => {
+    const err = new DOMException('stopped', 'AbortError')
+    expect(isRetryableError(err)).toBe(false)
+  })
+  it('network TypeError stays retryable', () => {
+    expect(isRetryableError(new TypeError('fetch failed'))).toBe(true)
+  })
+  it('429 / 5xx stay retryable', () => {
+    const e429 = Object.assign(new Error('rate'), { httpStatus: 429 })
+    const e503 = Object.assign(new Error('busy'), { httpStatus: 503 })
+    expect(isRetryableError(e429)).toBe(true)
+    expect(isRetryableError(e503)).toBe(true)
   })
 })
 
