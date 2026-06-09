@@ -4005,7 +4005,8 @@ async function executeTask(taskId: string) {
       maskDataUrl,
       onPartialImage: (partial) => {
         useStore.getState().setTaskStreamPreview(taskId, partial.image, partial.requestIndex)
-        void persistTaskStreamPartialImage(taskId, partial.image)
+        // final 帧是子请求成品，会在成功路径正式入库，无需再作为中间帧持久化
+        if (!partial.final) void persistTaskStreamPartialImage(taskId, partial.image)
       },
     })
 
@@ -4070,7 +4071,17 @@ async function executeTask(taskId: string) {
     })
     void deleteUnreferencedImageIds(partialImageIdsToClean)
 
-    useStore.getState().showToast(i18n.t('toast.generationCompleteWithCount', { count: outputIds.length }), 'success')
+    if (result.partialFailure) {
+      useStore.getState().showToast(
+        i18n.t('toast.generationPartialFailure', {
+          success: outputIds.length,
+          failed: result.partialFailure.failedCount,
+        }),
+        'error',
+      )
+    } else {
+      useStore.getState().showToast(i18n.t('toast.generationCompleteWithCount', { count: outputIds.length }), 'success')
+    }
     const currentMask = useStore.getState().maskDraft
     if (
       maskDataUrl &&

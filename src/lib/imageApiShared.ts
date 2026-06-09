@@ -17,12 +17,14 @@ export interface CallApiOptions {
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
   maskDataUrl?: string
-  onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number }) => void
+  onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number; final?: boolean }) => void
 }
 
 export interface CallApiResult {
   /** base64 data URL 列表 */
   images: string[]
+  /** 并发拆分时的部分失败信息（成功 ≥1 张但有失败时存在），全成功 / 全失败时 undefined */
+  partialFailure?: { failedCount: number; firstErrorMessage: string }
   /** API 返回的实际生效参数 */
   actualParams?: Partial<TaskParams>
   /** 每张图片对应的实际生效参数 */

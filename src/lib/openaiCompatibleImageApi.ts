@@ -38,6 +38,85 @@ function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
 }
 
+/** 并发拆分子请求的最大同时在飞数 */
+const MAX_CONCURRENT_IMAGE_REQUESTS = 3
+/** 可重试错误的重试次数 */
+const IMAGE_REQUEST_MAX_RETRIES = 1
+/** 重试前的退避时长（毫秒） */
+const IMAGE_REQUEST_RETRY_DELAY_MS = 800
+
+/** worker-pool 并发限流：最多 limit 个同时在飞，结果按输入顺序返回 */
+export async function runWithConcurrency<T>(
+  factories: Array<() => Promise<T>>,
+  limit: number,
+): Promise<PromiseSettledResult<T>[]> {
+  const results = new Array<PromiseSettledResult<T>>(factories.length)
+  let nextIndex = 0
+  const workerCount = Math.max(1, Math.min(limit, factories.length))
+
+  async function worker() {
+    while (nextIndex < factories.length) {
+      const current = nextIndex++
+      try {
+        results[current] = { status: 'fulfilled', value: await factories[current]() }
+      } catch (reason) {
+        results[current] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
+}
+
+/** 判定错误是否值得重试：超时（AbortError）、网络错误（TypeError）、429、5xx */
+export function isRetryableError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === 'AbortError') return true
+  if (err instanceof TypeError) return true
+  const status = (err as { httpStatus?: unknown } | null)?.httpStatus
+  if (typeof status === 'number') {
+    return status === 429 || status >= 500
+  }
+  return false
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 包裹单次子请求：可重试错误退避后重试，不可重试错误立即抛 */
+export async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = IMAGE_REQUEST_MAX_RETRIES): Promise<T> {
+  let attempt = 0
+  for (;;) {
+    try {
+      return await fn()
+    } catch (err) {
+      if (attempt >= maxRetries || !isRetryableError(err)) throw err
+      attempt++
+      await delay(IMAGE_REQUEST_RETRY_DELAY_MS)
+    }
+  }
+}
+
+/** 从并发结果聚合部分失败信息 */
+export function buildPartialFailure(
+  results: PromiseSettledResult<unknown>[],
+  successCount: number,
+): CallApiResult['partialFailure'] {
+  if (successCount === 0 || successCount === results.length) return undefined
+  const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  const reason = firstError?.reason
+  const firstErrorMessage = reason instanceof Error ? reason.message : String(reason ?? '')
+  return { failedCount: results.length - successCount, firstErrorMessage }
+}
+
+/** 构造带 HTTP status 的错误（供 isRetryableError 分类） */
+async function makeApiError(response: Response): Promise<Error> {
+  const err = new Error(await getApiErrorMessage(response))
+  ;(err as { httpStatus?: number }).httpStatus = response.status
+  return err
+}
+
 function normalizeImageApiPayload(value: unknown): ImageApiResponse {
   if (Array.isArray(value)) return { data: value as ImageApiResponse['data'] }
   if (value && typeof value === 'object') return value as ImageApiResponse
@@ -456,13 +535,20 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
       ...(profile.codexCli ? { quality: 'auto' as const } : {}),
     },
   }
-  const results = await Promise.allSettled(
-    Array.from({ length: n }).map((_, requestIndex) => callImagesApiSingle({
-      ...singleOpts,
-      onPartialImage: opts.onPartialImage
-        ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
-        : undefined,
-    }, profile)),
+  const results = await runWithConcurrency(
+    Array.from({ length: n }).map((_, requestIndex) => () =>
+      callWithRetry(() => callImagesApiSingle({
+        ...singleOpts,
+        onPartialImage: opts.onPartialImage
+          ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
+          : undefined,
+      }, profile)).then((result) => {
+        // 子请求完成即把成品图推进对应预览槽位，无需等其余子请求
+        const finalImage = result.images[0]
+        if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex, final: true })
+        return result
+      })),
+    MAX_CONCURRENT_IMAGE_REQUESTS,
   )
 
   const successfulResults = results
@@ -487,8 +573,16 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
     successfulResults[0]?.actualParams ?? {},
     { n: images.length },
   )
+  const partialFailure = buildPartialFailure(results, successfulResults.length)
 
-  return { images, actualParams, actualParamsList, revisedPrompts, ...(rawImageUrls.length ? { rawImageUrls } : {}) }
+  return {
+    images,
+    actualParams,
+    actualParamsList,
+    revisedPrompts,
+    ...(rawImageUrls.length ? { rawImageUrls } : {}),
+    ...(partialFailure ? { partialFailure } : {}),
+  }
 }
 
 async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
@@ -611,7 +705,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
     }
 
     if (!response.ok) {
-      throw new Error(await getApiErrorMessage(response))
+      throw await makeApiError(response)
     }
 
     if (shouldStreamImages && isEventStreamResponse(response)) {
@@ -630,13 +724,20 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
     return callResponsesImageApiSingle(opts, profile)
   }
 
-  const promises = Array.from({ length: n }).map((_, requestIndex) => callResponsesImageApiSingle({
-    ...opts,
-    onPartialImage: opts.onPartialImage
-      ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
-      : undefined,
-  }, profile))
-  const results = await Promise.allSettled(promises)
+  const results = await runWithConcurrency(
+    Array.from({ length: n }).map((_, requestIndex) => () =>
+      callWithRetry(() => callResponsesImageApiSingle({
+        ...opts,
+        onPartialImage: opts.onPartialImage
+          ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
+          : undefined,
+      }, profile)).then((result) => {
+        const finalImage = result.images[0]
+        if (finalImage) opts.onPartialImage?.({ image: finalImage, requestIndex, final: true })
+        return result
+      })),
+    MAX_CONCURRENT_IMAGE_REQUESTS,
+  )
 
   const successfulResults = results
     .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
@@ -660,8 +761,16 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
     successfulResults[0]?.actualParams ?? {},
     images.length === opts.params.n ? { n: opts.params.n } : { n: images.length },
   )
+  const partialFailure = buildPartialFailure(results, successfulResults.length)
 
-  return { images, actualParams, actualParamsList, revisedPrompts, ...(rawImageUrls.length ? { rawImageUrls } : {}) }
+  return {
+    images,
+    actualParams,
+    actualParamsList,
+    revisedPrompts,
+    ...(rawImageUrls.length ? { rawImageUrls } : {}),
+    ...(partialFailure ? { partialFailure } : {}),
+  }
 }
 
 async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
@@ -706,7 +815,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
     })
 
     if (!response.ok) {
-      throw new Error(await getApiErrorMessage(response))
+      throw await makeApiError(response)
     }
 
     if (profile.streamImages && isEventStreamResponse(response)) {

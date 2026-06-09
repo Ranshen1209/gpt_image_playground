@@ -507,6 +507,7 @@
     "agentImagesGenerated": "Agent generated images",
     "agentReplied": "Agent replied",
     "generationCompleteWithCount": "Generated {{count}} images",
+    "generationPartialFailure": "{{success}} done, {{failed}} failed",
     "addedOutputsToInput": "Added {{count}} output images to input",
     "deletedRecords": "Deleted {{count}} records",
     "recordDeleted": "Record deleted",
