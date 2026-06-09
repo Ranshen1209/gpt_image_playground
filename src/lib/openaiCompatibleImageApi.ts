@@ -171,12 +171,32 @@ export async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = IMAGE_
 
 /** 从失败数 + 首个错误聚合部分失败信息（凑满 N 后仍有缺口时透出） */
 export function buildPartialFailure(
-  failedCount: number,
-  firstError: unknown,
+  failedCountOrResults: number | PromiseSettledResult<unknown>[],
+  firstErrorOrSuccessCount: unknown,
 ): CallApiResult['partialFailure'] {
+  if (Array.isArray(failedCountOrResults)) {
+    const results = failedCountOrResults
+    const successCount = typeof firstErrorOrSuccessCount === 'number' ? firstErrorOrSuccessCount : 0
+    if (successCount === 0 || successCount === results.length) return undefined
+    const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    const reason = firstError?.reason
+    const firstErrorMessage = reason instanceof Error ? reason.message : String(reason ?? '')
+    return { failedCount: results.length - successCount, firstErrorMessage }
+  }
+
+  const failedCount = failedCountOrResults
+  const firstError = firstErrorOrSuccessCount
   if (failedCount <= 0) return undefined
   const firstErrorMessage = firstError instanceof Error ? firstError.message : String(firstError ?? '')
   return { failedCount, firstErrorMessage }
+}
+
+/** 构造带 HTTP status 的错误（供 isRetryableError 分类），同时保留流式提示文案。 */
+async function makeApiError(response: Response, streamImages?: boolean): Promise<Error> {
+  const errorMessage = await getApiErrorMessage(response)
+  const err = new Error(maybeAppendStreamingHint(errorMessage, response.status, streamImages))
+  ;(err as { httpStatus?: number }).httpStatus = response.status
+  return err
 }
 
 /**
@@ -889,8 +909,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
     }
 
     if (!response.ok) {
-      const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw await makeApiError(response, profile.streamImages)
     }
 
     if (shouldStreamImages && isEventStreamResponse(response)) {
@@ -1297,8 +1316,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
     })
 
     if (!response.ok) {
-      const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw await makeApiError(response, profile.streamImages)
     }
 
     if (profile.streamImages && isEventStreamResponse(response)) {

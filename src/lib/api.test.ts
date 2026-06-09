@@ -480,10 +480,18 @@ describe('callImageApi', () => {
       'data:image/png;base64,ZmluYWw=',
       'data:image/png;base64,ZmluYWw=',
     ])
-    expect(partials.map((partial) => partial.requestIndex).sort()).toEqual([0, 1])
-    expect(partials.map((partial) => partial.image)).toEqual([
+    // 每个子请求会回调 2 次：流式中间帧 + 完成后的成品帧（final）
+    const partialFrames = partials.filter((p) => !(p as { final?: boolean }).final)
+    const finalFrames = partials.filter((p) => (p as { final?: boolean }).final)
+    expect(partialFrames.map((p) => p.requestIndex).sort()).toEqual([0, 1])
+    expect(partialFrames.map((p) => p.image)).toEqual([
       'data:image/png;base64,cGFydGlhbA==',
       'data:image/png;base64,cGFydGlhbA==',
+    ])
+    expect(finalFrames.map((p) => p.requestIndex).sort()).toEqual([0, 1])
+    expect(finalFrames.map((p) => p.image)).toEqual([
+      'data:image/png;base64,ZmluYWw=',
+      'data:image/png;base64,ZmluYWw=',
     ])
   })
 
