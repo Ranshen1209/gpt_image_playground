@@ -2010,7 +2010,7 @@ function getApiRequestNetworkErrorHint(
   err: unknown,
   createdAt: number,
   usesApiProxy: boolean,
-  profile?: Pick<ApiProfile, 'provider' | 'apiMode' | 'streamImages' | 'streamPartialImages'> | null,
+  profile?: Pick<ApiProfile, 'provider' | 'apiMode' | 'streamImages' | 'streamPartialImages' | 'streamChatCompletionsImage'> | null,
 ): string | null {
   if (!isApiRequestNetworkError(err)) return null
 
@@ -4843,6 +4843,7 @@ async function executeTask(taskId: string) {
         apiMode: settingsNow.apiMode,
         streamImages: activeProfileNow.streamImages,
         streamPartialImages: activeProfileNow.streamPartialImages,
+        streamChatCompletionsImage: activeProfileNow.streamChatCompletionsImage,
       }
       const networkErrorHint = getApiRequestNetworkErrorHint(err, latestTask.createdAt, usesApiProxy, hintProfile)
       if (networkErrorHint && !messageContainsImageFetchCorsHint(errorMessage)) {
