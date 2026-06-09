@@ -94,7 +94,18 @@ describe('callImageApi', () => {
     }))
 
     const result = await callImageApi({
-      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', codexCli: true },
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        codexCli: true,
+        streamChatCompletionsImage: false,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          codexCli: true,
+          streamChatCompletionsImage: false,
+        })),
+      },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
@@ -125,7 +136,18 @@ describe('callImageApi', () => {
     }))
 
     const result = await callImageApi({
-      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', codexCli: true },
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        codexCli: true,
+        streamChatCompletionsImage: false,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          codexCli: true,
+          streamChatCompletionsImage: false,
+        })),
+      },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
@@ -151,7 +173,16 @@ describe('callImageApi', () => {
     }))
 
     await callImageApi({
-      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamChatCompletionsImage: false,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamChatCompletionsImage: false,
+        })),
+      },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS, size: '2048x2048' },
       inputImageDataUrls: [],
@@ -203,11 +234,13 @@ describe('callImageApi', () => {
         apiKey: 'test-key',
         streamImages: true,
         streamPartialImages: 3,
+        streamChatCompletionsImage: false,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
           streamImages: true,
           streamPartialImages: 3,
+          streamChatCompletionsImage: false,
         })),
       },
       prompt: 'prompt',
@@ -326,11 +359,13 @@ describe('callImageApi', () => {
         apiKey: 'test-key',
         streamImages: true,
         streamPartialImages: 3,
+        streamChatCompletionsImage: false,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
           streamImages: true,
           streamPartialImages: 3,
+          streamChatCompletionsImage: false,
         })),
       },
       prompt: '修复这张图片',
@@ -364,10 +399,12 @@ describe('callImageApi', () => {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
         streamImages: true,
+        streamChatCompletionsImage: false,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
           streamImages: true,
+          streamChatCompletionsImage: false,
         })),
       },
       prompt: 'prompt',
@@ -405,10 +442,12 @@ describe('callImageApi', () => {
         ...DEFAULT_SETTINGS,
         apiKey: 'test-key',
         streamImages: true,
+        streamChatCompletionsImage: false,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
           streamImages: true,
+          streamChatCompletionsImage: false,
         })),
       },
       prompt: 'prompt',
@@ -455,11 +494,13 @@ describe('callImageApi', () => {
         apiKey: 'test-key',
         streamImages: true,
         streamPartialImages: 1,
+        streamChatCompletionsImage: false,
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
           apiKey: 'test-key',
           streamImages: true,
           streamPartialImages: 1,
+          streamChatCompletionsImage: false,
         })),
       },
       prompt: 'prompt',
@@ -855,7 +896,16 @@ describe('callImageApi', () => {
     }))
 
     await callImageApi({
-      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamChatCompletionsImage: false,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamChatCompletionsImage: false,
+        })),
+      },
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],

@@ -99,6 +99,7 @@ export interface AppSettings {
   codexCli: boolean
   apiProxy: boolean
   streamImages?: boolean
+  streamChatCompletionsImage?: boolean
   streamPartialImages?: number
   customProviders: CustomProviderDefinition[]
   providerOrder?: string[]
