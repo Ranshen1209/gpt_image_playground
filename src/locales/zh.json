@@ -617,7 +617,8 @@
     "networkProxyTimeoutOther": "提示：请求等待较长时间后被断开，通常是反向代理或网关的超时限制，而非接口本身报错。可检查代理超时设置，或降低图片尺寸/质量后重试。{{hint}}",
     "agentImagesGenerated": "图像已生成。",
     "agentNoTextResponse": "[No text response]",
-    "agentRoundLimitNotice": "已达到最大工具调用次数（{{max}}），已停止自动续跑。"
+    "agentRoundLimitNotice": "已达到最大工具调用次数（{{max}}），已停止自动续跑。",
+    "chatImageNoImage": "上游未返回图片(可能繁忙),已自动重试"
   },
   "agentWebSearch": {
     "openingPage": "正在读取网页",

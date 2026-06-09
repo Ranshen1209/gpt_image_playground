@@ -617,7 +617,8 @@
     "networkProxyTimeoutOther": "Hint: connection cut off after a long wait. Likely a reverse proxy or gateway timeout, not the API. Check proxy timeouts or lower image size/quality.{{hint}}",
     "agentImagesGenerated": "Image generated.",
     "agentNoTextResponse": "[No text response]",
-    "agentRoundLimitNotice": "Reached the max tool call count ({{max}}); auto continuation stopped."
+    "agentRoundLimitNotice": "Reached the max tool call count ({{max}}); auto continuation stopped.",
+    "chatImageNoImage": "Upstream returned no image (possibly busy); retried automatically"
   },
   "agentWebSearch": {
     "openingPage": "Opening page",
