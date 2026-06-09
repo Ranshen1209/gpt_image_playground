@@ -23,6 +23,7 @@ Sakrylle 图像生成站 fork of [CookSleep/gpt_image_playground](https://github
 |---|---|---|
 | Images API | `POST images/generations` | 文生图 |
 | Images API | `POST images/edits` | 参考图 / 蒙版编辑（multipart） |
+| Chat 图像 | `POST chat/completions` (stream) | Sakrylle 图像生成默认路径(文生图/参考图/蒙版),连续 SSE 防 Cloudflare 524 |
 | Responses API | `POST responses` | Agent 多轮对话 + 流式图像 |
 | 平台 API | `GET me` | 用户信息 / 余额 / group 列表（v2，需 OAuth Bearer + scope） |
 | 平台 API | `GET account/balance` | 余额 + group 元信息（v1 legacy fallback） |
@@ -153,6 +154,7 @@ i18next + react-i18next。所有翻译资源 inline，不走 lazy load — bundl
 本站设计成 **多服务商**架构（OpenAI 兼容 / fal.ai / 自定义 HTTP），不是 Sakrylle-only。改造时**保留多服务商**，只改默认值，不要砍 fal.ai 等代码路径 — 用户可能配自己的 key 调别处。
 
 - **Images API vs Responses API**: 两套接口都打 OpenAI 兼容路径，区别在请求结构。Sakrylle 网关同时支持，但 Responses API 流式（`stream: true`）路径稳定性受上游影响 — 见 commit `63a2b29` "继续修复 Images API 流式响应兼容性 (fix #70)"。**Sakrylle 当前 GPT-Image group 不保证支持 Responses API 流式图像**，TODO：拿 group_id=5 的 key 实测 `POST /v1/responses` 行为，写明
+- **流式 chat/completions 图像路径**(v0.10.3): Sakrylle baseUrl + `streamChatCompletionsImage`(默认 true)时,文生图/参考图/蒙版统一走 `POST chat/completions` `stream:true`。实测上游对 `images/generations`/`images/edits` 即使传 `stream:true` 也返回整块 JSON(生成期间零字节 → Cloudflare ~100s 524 切断慢图);chat/completions 返回真 SSE(首字节 ~1.5s + `Progressing...` 进度心跳)。图片在终块 `delta.content` 的 Markdown `![image](URL)` 里。前端 `chatCompletionsImageApi.ts` 双计时器:整体 600s 不复位 + 空闲 60s 每 chunk 复位。空闲超时可重试、整体超时/用户取消不可重试。蒙版作为额外 image_url + 文字说明(实测语义保留,但仅 64² 色块验证过,真实复杂图边缘精度待回归)。
 - **Codex CLI 兼容模式**: Toggle 后会把多图请求拆成并发单图。Sakrylle 不是 Codex CLI 上游 — 默认关
 - **n>1 多图并发拆分** (`openaiCompatibleImageApi.ts::callImagesApiConcurrent` / `callResponsesImageApi`, v0.10.2): `streamImages: true`（Sakrylle 默认）或 codexCli 开启时，`n>1` 会拆成 n 个各自 `n:1` 的独立请求。**实测定论（2026-06-09，group_id=5 key 实打 api.sakrylle.com）**：① 上游 gpt-image-2 **不支持单请求 `n>1`** —— `n:2`/`n:3` 都忽略 n 只回 1 张且只按 1 张计费，所以拆分是拿到 N 张的**唯一**办法，"走原生单请求 n=N"这条路不通；② 网关单用户**并发墙=6** —— 6 并发 6/6 全成功，7+ 触发 429 `"Concurrency limit exceeded for user"`，故 `MAX_CONCURRENT_IMAGE_REQUESTS=6` 贴墙取值；③ 单请求慢 22~101s，但默认 `DEFAULT_API_TIMEOUT=600s` 充足。**实现**（`runImageRequestsWithRefill`）：拆成 n 个 `n:1` 请求，worker-pool 限流 6 在飞；失败子请求（含 429/5xx，由 `isRetryableError` 判定，error 经 `makeApiError` 带 `httpStatus`）**补发凑满 N**，补发预算 `IMAGE_REQUEST_REFILL_BUDGET_FACTOR=1`（总请求 ≤ 2N，防持续失败烧钱，按次 ¥0.15 计最坏 2N×¥0.15）；每个子请求自带 `callWithRetry`（transient 退避重试 1 次）+ 成功即 `onPartialImage({final:true})` 推进 `streamPreviewSlots[taskId][requestIndex]` 预览槽位逐张呈现；本轮零成功且全为不可重试失败（4xx/moderation）则立即停止不补发；凑满后无 `partialFailure`，撞预算/硬限制仍缺则保留成功图 + 经 `CallApiResult.partialFailure` 弹 `toast.generationPartialFailure`（目标 vs 实际计数），全失败 throw。**注意**：上游 `ai.centos.hk` 偶发整体 502 `"Upstream request failed"`（2026-06-09 实测遇到过一段），此时补发也补不满，正确降级为部分/全失败报错
 - **PROMPT_REWRITE_GUARD_PREFIX** (`openaiCompatibleImageApi.ts`): Responses API 始终前置 `"Use the following text as the complete prompt. Do not rewrite it:"`。Sakrylle 上游若改写提示词会触发 UI 提示开 Codex 兼容模式
