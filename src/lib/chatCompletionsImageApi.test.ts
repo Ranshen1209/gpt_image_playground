@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseChatCompletionImageStream, extractMarkdownImageUrl } from './chatCompletionsImageApi'
+import { parseChatCompletionImageStream, extractMarkdownImageUrl, buildChatMessageContent } from './chatCompletionsImageApi'
 
 function sseResponse(blocks: string[]): Response {
   const body = blocks.map((b) => `data: ${b}\n\n`).join('')
@@ -65,5 +65,29 @@ describe('parseChatCompletionImageStream', () => {
     const res = sseResponse([chunk('![image](https://f.example.com/c.png)', 'stop')])
     await parseChatCompletionImageStream(res, 'image/png', onPartial, vi.fn(), fetchAsDataUrl)
     expect(onPartial).toHaveBeenCalledWith(expect.objectContaining({ image: 'data:image/png;base64,CCC', final: true }))
+  })
+})
+
+describe('buildChatMessageContent', () => {
+  const GUARD = 'Use the following text as the complete prompt. Do not rewrite it:'
+
+  it('text-to-image: only a text part with guard prefix', () => {
+    const content = buildChatMessageContent('a red apple', [], undefined)
+    expect(content).toEqual([{ type: 'text', text: `${GUARD}\na red apple` }])
+  })
+
+  it('reference images: text + one image_url per input', () => {
+    const content = buildChatMessageContent('combine', ['data:image/png;base64,AAA', 'data:image/png;base64,BBB'], undefined)
+    expect(content[0]).toEqual({ type: 'text', text: `${GUARD}\ncombine` })
+    expect(content[1]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } })
+    expect(content[2]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,BBB' } })
+  })
+
+  it('mask: main image + mask image_url + mask-semantics text note', () => {
+    const content = buildChatMessageContent('fill center', ['data:image/png;base64,MAIN'], 'data:image/png;base64,MASK')
+    const urls = content.filter((p): p is { type: 'image_url'; image_url: { url: string } } => p.type === 'image_url').map((p) => p.image_url.url)
+    expect(urls).toEqual(['data:image/png;base64,MAIN', 'data:image/png;base64,MASK'])
+    const textPart = content[0] as { type: 'text'; text: string }
+    expect(textPart.text).toContain('mask')
   })
 })
