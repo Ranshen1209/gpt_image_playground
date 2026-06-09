@@ -21,7 +21,7 @@ import {
 import { resolveBearerToken } from './oauthFallback'
 import { getSakrylleImageRequestParams } from './sakrylleImageSize'
 
-const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+export const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
 
 const IMAGES_GENERATION_PATH = 'images/generations'
 const IMAGES_EDIT_PATH = 'images/edits'
@@ -190,16 +190,16 @@ function isEventStreamResponse(response: Response): boolean {
   return response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream') ?? false
 }
 
-function isRecordValue(value: unknown): value is Record<string, unknown> {
+export function isRecordValue(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function getStringValue(source: Record<string, unknown>, key: string): string | undefined {
+export function getStringValue(source: Record<string, unknown>, key: string): string | undefined {
   const value = source[key]
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
-function getNumberValue(source: Record<string, unknown>, key: string): number | undefined {
+export function getNumberValue(source: Record<string, unknown>, key: string): number | undefined {
   const value = source[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
@@ -232,7 +232,7 @@ function parseServerSentEventBlock(block: string): string | null {
   return data
 }
 
-async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>): Promise<void> {
+export async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>): Promise<void> {
   if (!response.body) throw new Error(i18n.t('errors.imagesStreamNoBody'))
 
   const reader = response.body.getReader()
