@@ -606,6 +606,7 @@
     "clipboardCopyFailed": "Copy failed: {{reason}}",
     "openaiTimeout": "Request timed out: more than {{seconds}} seconds elapsed. Retry or raise the timeout.{{hint}}",
     "removedImageMention": "@RemovedImage",
+    "timeoutHintChatOverall": "Generation exceeded the time limit. You can raise the timeout in settings.",
     "timeoutHintStreaming": " You can also enable \"Streaming\" and raise \"Partial image count\" to keep the connection alive.",
     "timeoutHintPartialZero": " The official streaming endpoint sends no heartbeats. \"Partial image count\" is 0, so the connection may drop. Try 2 or 3.",
     "timeoutHintPartialLow": " You can also raise \"Partial image count\" to keep the connection alive during long runs.",
