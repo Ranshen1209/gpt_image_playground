@@ -232,10 +232,21 @@ function parseServerSentEventBlock(block: string): string | null {
   return data
 }
 
-export async function readJsonServerSentEvents(response: Response, onEvent: (event: Record<string, unknown>) => void | Promise<void>): Promise<void> {
+export async function readJsonServerSentEvents(
+  response: Response,
+  onEvent: (event: Record<string, unknown>) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
   if (!response.body) throw new Error(i18n.t('errors.imagesStreamNoBody'))
 
   const reader = response.body.getReader()
+
+  // When the caller's AbortSignal fires (e.g. idle-timeout or overall-timeout)
+  // cancel the reader so the pending reader.read() rejects immediately rather
+  // than hanging until the next network chunk arrives.
+  const onAbort = () => { reader.cancel().catch(() => {}) }
+  signal?.addEventListener('abort', onAbort, { once: true })
+
   const decoder = new TextDecoder()
   let buffer = ''
 
@@ -257,19 +268,26 @@ export async function readJsonServerSentEvents(response: Response, onEvent: (eve
     await onEvent(event)
   }
 
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      // If the reader was cancelled because the AbortSignal fired, throw so
+      // the caller's catch block (which holds the named timeout error) takes over.
+      if (signal?.aborted) throw new DOMException('AbortError', 'AbortError')
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
 
-    let separatorIndex = buffer.search(/\r?\n\r?\n/)
-    while (separatorIndex >= 0) {
-      const block = buffer.slice(0, separatorIndex)
-      const separator = buffer.match(/\r?\n\r?\n/)?.[0] ?? '\n\n'
-      buffer = buffer.slice(separatorIndex + separator.length)
-      await processBlock(block)
-      separatorIndex = buffer.search(/\r?\n\r?\n/)
+      let separatorIndex = buffer.search(/\r?\n\r?\n/)
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex)
+        const separator = buffer.match(/\r?\n\r?\n/)?.[0] ?? '\n\n'
+        buffer = buffer.slice(separatorIndex + separator.length)
+        await processBlock(block)
+        separatorIndex = buffer.search(/\r?\n\r?\n/)
+      }
     }
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
 
   buffer += decoder.decode()

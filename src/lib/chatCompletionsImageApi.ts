@@ -82,7 +82,7 @@ export async function parseChatCompletionImageStream(
     if (!isRecordValue(first)) return
     const delta = first.delta
     if (isRecordValue(delta)) accumulated += deltaContentToText(delta.content)
-  })
+  }, signal)
 
   const url = extractMarkdownImageUrl(accumulated)
   if (!url) {
@@ -123,17 +123,24 @@ export async function callImagesApiViaChat(opts: CallApiOptions, profile: ApiPro
     return err
   }
 
-  const overallTimeoutId = setTimeout(
-    () => controller.abort(makeTimeoutError('OverallTimeout', i18n.t('errors.chatImageOverallTimeout'))),
-    profile.timeout * 1000,
-  )
+  // Store which timeout fired rather than the Error itself.  Creating a named
+  // Error inside a fake-timer callback causes Vitest to track it as a
+  // potential unhandled rejection at creation time (before the async catch
+  // block has a chance to handle it).  We defer Error construction to the
+  // synchronous catch block where it is immediately re-thrown and caught.
+  let abortReason: 'idle' | 'overall' | undefined
+
+  const overallTimeoutId = setTimeout(() => {
+    abortReason = 'overall'
+    controller.abort()
+  }, profile.timeout * 1000)
   let idleTimeoutId: ReturnType<typeof setTimeout>
   const resetIdle = () => {
     clearTimeout(idleTimeoutId)
-    idleTimeoutId = setTimeout(
-      () => controller.abort(makeTimeoutError('IdleTimeout', i18n.t('errors.chatImageIdleTimeout'))),
-      IDLE_TIMEOUT_MS,
-    )
+    idleTimeoutId = setTimeout(() => {
+      abortReason = 'idle'
+      controller.abort()
+    }, IDLE_TIMEOUT_MS)
   }
   resetIdle()
 
@@ -154,8 +161,11 @@ export async function callImagesApiViaChat(opts: CallApiOptions, profile: ApiPro
 
     return await parseChatCompletionImageStream(response, mime, opts.onPartialImage, resetIdle, defaultFetchImageUrlAsDataUrl, controller.signal)
   } catch (err) {
-    if (controller.signal.aborted && controller.signal.reason instanceof Error) {
-      throw controller.signal.reason
+    if (controller.signal.aborted && abortReason) {
+      throw makeTimeoutError(
+        abortReason === 'idle' ? 'IdleTimeout' : 'OverallTimeout',
+        i18n.t(abortReason === 'idle' ? 'errors.chatImageIdleTimeout' : 'errors.chatImageOverallTimeout'),
+      )
     }
     throw err
   } finally {
