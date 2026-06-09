@@ -604,3 +604,20 @@ describe('custom providers', () => {
     expect(DEFAULT_SETTINGS.baseUrl).toBe('https://api.sakrylle.com/v1')
   })
 })
+
+describe('streamChatCompletionsImage', () => {
+  it('defaults to true on a fresh profile', () => {
+    const profile = createDefaultOpenAIProfile()
+    expect(profile.streamChatCompletionsImage).toBe(true)
+  })
+
+  it('fills default true for a legacy profile missing the field', () => {
+    const normalized = normalizeApiProfile({ id: 'x', name: 'legacy', baseUrl: 'https://api.sakrylle.com/v1' })
+    expect(normalized.streamChatCompletionsImage).toBe(true)
+  })
+
+  it('preserves an explicit false', () => {
+    const normalized = normalizeApiProfile({ streamChatCompletionsImage: false })
+    expect(normalized.streamChatCompletionsImage).toBe(false)
+  })
+})

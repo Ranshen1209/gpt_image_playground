@@ -344,6 +344,7 @@ export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}):
     codexCli: false,
     apiProxy: DEFAULT_OPENAI_API_PROXY,
     streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
+    streamChatCompletionsImage: true,
     ...overrides,
     apiMode,
     streamImages,
@@ -363,6 +364,7 @@ export function createDefaultFalProfile(overrides: Partial<ApiProfile> = {}): Ap
     codexCli: false,
     apiProxy: false,
     streamImages: false,
+    streamChatCompletionsImage: false,
     streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
     ...overrides,
   }
@@ -504,6 +506,7 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : defaults.apiProxy,
     responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
     streamImages,
+    streamChatCompletionsImage: typeof record.streamChatCompletionsImage === 'boolean' ? record.streamChatCompletionsImage : defaults.streamChatCompletionsImage,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, defaults.streamPartialImages),
     imageProfileId: typeof record.imageProfileId === 'string' && record.imageProfileId.trim()
       ? record.imageProfileId.trim()
@@ -539,6 +542,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : DEFAULT_OPENAI_API_PROXY,
     responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
     streamImages: typeof record.streamImages === 'boolean' ? record.streamImages : true,
+    streamChatCompletionsImage: typeof record.streamChatCompletionsImage === 'boolean' ? record.streamChatCompletionsImage : true,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages),
   })
   const profiles = Array.isArray(record.profiles) && record.profiles.length
