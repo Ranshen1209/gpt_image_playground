@@ -618,7 +618,9 @@
     "agentImagesGenerated": "Image generated.",
     "agentNoTextResponse": "[No text response]",
     "agentRoundLimitNotice": "Reached the max tool call count ({{max}}); auto continuation stopped.",
-    "chatImageNoImage": "Upstream returned no image (possibly busy); retried automatically"
+    "chatImageNoImage": "Upstream returned no image (possibly busy); retried automatically",
+    "chatImageIdleTimeout": "Connection dropped or upstream stalled; retried automatically",
+    "chatImageOverallTimeout": "Image generation exceeded the time limit"
   },
   "agentWebSearch": {
     "openingPage": "Opening page",
