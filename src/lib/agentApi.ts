@@ -1,5 +1,5 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
-import { dataUrlToBlob } from './canvasImage'
+import { compressImageForUpload, dataUrlToBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { assertImageInputPayloadSize, fetchImageUrlAsDataUrl, getApiErrorMessage, isHttpUrl, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
 import { DEFAULT_RESPONSES_MODEL } from './apiProfiles'
@@ -449,6 +449,31 @@ function createInput(messages: AgentApiMessage[]) {
   })
 }
 
+// Downsample + re-encode oversized input_image data URLs in a Responses API
+// input before send (transient — store/history keep the originals). Large
+// uploaded reference photos otherwise make the request body so big that upstream
+// processing stalls and the gateway cuts the connection ("Failed to fetch").
+// Mirrors the chat/completions path compression. Only data: URLs are touched;
+// http(s) image_url entries (already remote) are left as-is.
+async function compressResponsesInputImages(input: unknown): Promise<unknown> {
+  if (!Array.isArray(input)) return input
+  return Promise.all(input.map(async (item) => {
+    if (!isRecordValue(item) || !Array.isArray(item.content)) return item
+    const content = await Promise.all((item.content as unknown[]).map(async (part) => {
+      if (
+        isRecordValue(part) &&
+        part.type === 'input_image' &&
+        typeof part.image_url === 'string' &&
+        part.image_url.startsWith('data:')
+      ) {
+        return { ...part, image_url: await compressImageForUpload(part.image_url) }
+      }
+      return part
+    }))
+    return { ...item, content }
+  }))
+}
+
 function extractText(payload: ResponsesApiResponse) {
   const chunks: string[] = []
 
@@ -780,12 +805,14 @@ export async function callAgentResponsesApi(opts: {
   signal?.addEventListener('abort', abortFromCaller, { once: true })
 
   try {
+    const compressedInput = await compressResponsesInputImages(input)
+    const compressedMask = maskDataUrl ? await compressImageForUpload(maskDataUrl, { isMask: true }) : undefined
     const createBody = (includeImageTool: boolean): Record<string, unknown> => {
       const body: Record<string, unknown> = {
         model: profile.responsesModel || DEFAULT_RESPONSES_MODEL,
         instructions: createAgentInstructions(settings, useAppManagedImageGeneration, includeImageTool),
-        input,
-        tools: createAgentTools(params, profile, settings, maskDataUrl, useAppManagedImageGeneration, includeImageTool),
+        input: compressedInput,
+        tools: createAgentTools(params, profile, settings, compressedMask, useAppManagedImageGeneration, includeImageTool),
       }
       if (shouldStreamResponse && includeImageTool) {
         body.stream = true
@@ -1074,7 +1101,12 @@ export async function callBatchImageSingle(opts: {
   onPartialImage?: (event: { image: string; partialImageIndex?: number }) => void | Promise<void>
   onImageToolCompleted?: (image: AgentApiResultImage) => void | Promise<void>
 }): Promise<BatchImageCallResult> {
-  const { profile, allProfiles, params, batchItemId, prompt, referenceImageDataUrls, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
+  const { profile, allProfiles, params, batchItemId, prompt, referenceIds, signal, onImageToolStarted, onPartialImage, onImageToolCompleted } = opts
+  // Downsample oversized reference images once, up front, so both the delegated
+  // Images API path and the Responses image_generation path send a small body.
+  const referenceImageDataUrls = await Promise.all(
+    opts.referenceImageDataUrls.map((url) => compressImageForUpload(url)),
+  )
 
   // Auto-detect: if current profile is responses mode, find first images profile
   const imageProfile = profile.apiMode === 'images' ? profile : findAgentImagesApiProfile(profile, allProfiles)

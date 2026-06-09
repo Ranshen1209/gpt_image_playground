@@ -2,6 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS } from './apiProfiles'
 import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle } from './agentApi'
+import { compressImageForUpload } from './canvasImage'
+
+// Preserve the real canvas helpers (agentApi imports dataUrlToBlob) and default
+// compressImageForUpload to identity so existing tests are unaffected; the
+// compression tests below override it to observe the wiring.
+vi.mock('./canvasImage', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./canvasImage')>()
+  return { ...real, compressImageForUpload: vi.fn(async (u: string) => u) }
+})
 
 describe('callAgentResponsesApi', () => {
   afterEach(() => {
@@ -437,5 +446,124 @@ describe('callBatchImageSingle', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result.image).toBeNull()
     expect(result.error).toContain('Images API profile')
+  })
+})
+
+describe('Agent input image compression', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(compressImageForUpload).mockReset()
+    vi.mocked(compressImageForUpload).mockImplementation(async (u: string) => u)
+  })
+
+  it('compresses input_image data URLs in the Responses input before send (text parts untouched)', async () => {
+    vi.mocked(compressImageForUpload).mockImplementation(async (u: string) => `c::${u}`)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
+      apiMode: 'responses',
+    })
+
+    await callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile,
+      params: DEFAULT_PARAMS,
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'edit this' },
+          { type: 'input_image', image_url: 'data:image/png;base64,BIG' },
+        ],
+      }],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    const parts = body.input[0].content
+    expect(parts.find((p: { type: string }) => p.type === 'input_text').text).toBe('edit this')
+    expect(parts.find((p: { type: string }) => p.type === 'input_image').image_url).toBe('c::data:image/png;base64,BIG')
+    expect(compressImageForUpload).toHaveBeenCalledWith('data:image/png;base64,BIG')
+  })
+
+  it('does not compress non-data image_url entries', async () => {
+    const compressSpy = vi.mocked(compressImageForUpload)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
+      apiMode: 'responses',
+    })
+
+    await callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile,
+      params: DEFAULT_PARAMS,
+      input: [{
+        role: 'user',
+        content: [{ type: 'input_image', image_url: 'https://cdn.example.com/x.png' }],
+      }],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.input[0].content[0].image_url).toBe('https://cdn.example.com/x.png')
+    expect(compressSpy).not.toHaveBeenCalled()
+  })
+
+  it('compresses the mask passed to the Agent image tool with isMask:true', async () => {
+    vi.mocked(compressImageForUpload).mockImplementation(async (u: string) => `c::${u}`)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
+      apiMode: 'responses',
+    })
+
+    await callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile,
+      params: DEFAULT_PARAMS,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit' }] }],
+      maskDataUrl: 'data:image/png;base64,MASK',
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.tools[0].input_image_mask).toEqual({ image_url: 'c::data:image/png;base64,MASK' })
+    expect(compressImageForUpload).toHaveBeenCalledWith('data:image/png;base64,MASK', { isMask: true })
+  })
+
+  it('compresses reference images on the Responses batch image generation path', async () => {
+    vi.mocked(compressImageForUpload).mockImplementation(async (u: string) => `c::${u}`)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'image_generation_call', id: 'ig_1', result: 'ZmluYWw=', size: '1024x1024' }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
+      apiMode: 'responses',
+      model: 'gpt-5.5',
+    })
+
+    await callBatchImageSingle({
+      profile,
+      params: DEFAULT_PARAMS,
+      batchItemId: 'item-1',
+      prompt: 'edit it',
+      referenceImageDataUrls: ['data:image/png;base64,REF'],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    const imgPart = body.input[0].content.find((p: { type: string }) => p.type === 'input_image')
+    expect(imgPart.image_url).toBe('c::data:image/png;base64,REF')
+    expect(compressImageForUpload).toHaveBeenCalledWith('data:image/png;base64,REF')
   })
 })
