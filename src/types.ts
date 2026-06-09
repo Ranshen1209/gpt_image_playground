@@ -21,6 +21,8 @@ export interface ApiProfile {
   apiProxy: boolean
   responseFormatB64Json?: boolean
   streamImages?: boolean
+  /** 走流式 chat/completions 图像路径(仅 Sakrylle baseUrl 生效)。默认 true */
+  streamChatCompletionsImage?: boolean
   streamPartialImages?: number
   /** Agent 模式图像生成使用的 profile ID（可选）。若指定，Agent 生成图像时切换到该 profile 调用 Images API */
   imageProfileId?: string
