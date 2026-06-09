@@ -135,6 +135,8 @@
       "modelHintQuery": "Override via query string: ?model=.",
       "streamImages": "Streaming",
       "streamImagesHint": "When enabled, requests stream — not every provider or gateway supports this. The official endpoint sends no heartbeats while streaming, so partial images are needed to keep the connection alive. Streaming on the official endpoint only supports one image, so multi-image generations are split into concurrent single-image calls.",
+      "streamChatImage": "Streaming chat/completions image",
+      "streamChatImageHint": "Only applies to the official Sakrylle endpoint. Uses a continuous byte stream to prevent generation timeouts and provides a progress heartbeat. Keep it on.",
       "streamPartialImages": "Partial image count",
       "streamPartialImagesHint": "Maps to the partial_images parameter (0-3). Setting it to 2 or 3 helps prevent long-running connections from timing out. Each partial image incurs a small extra charge. With 0, no partial images are requested and the connection may drop due to lack of data.",
       "streamPartialImagesNone": "0, none",

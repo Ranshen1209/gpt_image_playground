@@ -748,6 +748,7 @@ export default function SettingsModal() {
         apiProxy: nextApiProxy,
         codexCli: profile.provider === 'openai' ? profile.codexCli : false,
         streamImages: profile.provider === 'openai' ? profile.streamImages : false,
+        streamChatCompletionsImage: profile.provider === 'openai' ? profile.streamChatCompletionsImage : false,
         streamPartialImages: profile.provider === 'openai' ? normalizeStreamPartialImages(profile.streamPartialImages) : DEFAULT_STREAM_PARTIAL_IMAGES,
       }
     })
@@ -1820,6 +1821,24 @@ export default function SettingsModal() {
               {/* 8. 流式传输 + 中间步骤图像数 */}
               {activeProfile.provider === 'openai' && (
                 <div className="block space-y-3">
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between gap-3">
+                      <span className="block text-sm text-gray-600 dark:text-gray-300">{t('settings.api.streamChatImage')}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateActiveProfile({ streamChatCompletionsImage: !activeProfile.streamChatCompletionsImage }, true)}
+                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${activeProfile.streamChatCompletionsImage ? 'bg-[#9181bd]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        role="switch"
+                        aria-checked={!!activeProfile.streamChatCompletionsImage}
+                        aria-label={t('settings.api.streamChatImage')}
+                      >
+                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${activeProfile.streamChatCompletionsImage ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                      </button>
+                    </div>
+                    <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
+                      {t('settings.api.streamChatImageHint')}
+                    </div>
+                  </div>
                   <div>
                     <div className="mb-1.5 flex items-center justify-between gap-3">
                       <span className="block text-sm text-gray-600 dark:text-gray-300">{t('settings.api.streamImages')}</span>
