@@ -38,6 +38,7 @@ export interface AppSettings {
   codexCli: boolean
   apiProxy: boolean
   streamImages?: boolean
+  streamChatCompletionsImage?: boolean
   streamPartialImages?: number
   clearInputAfterSubmit: boolean
   persistInputOnRestart: boolean
