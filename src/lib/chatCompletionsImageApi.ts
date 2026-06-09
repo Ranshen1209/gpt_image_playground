@@ -72,16 +72,3 @@ export async function parseChatCompletionImageStream(
 
   return { images: [dataUrl], rawImageUrls: [url] }
 }
-
-// Re-export for use by callImagesApiViaChat (Task 5) — keeps imports explicit there
-export {
-  CHAT_COMPLETIONS_PATH,
-  MIME_MAP,
-  PROMPT_REWRITE_GUARD_PREFIX,
-  buildApiUrl,
-  readClientDevProxyConfig,
-  shouldUseApiProxy,
-  resolveBearerToken,
-  getSakrylleImageRequestParams,
-}
-export type { ApiProfile, CallApiOptions, CallApiResult }
