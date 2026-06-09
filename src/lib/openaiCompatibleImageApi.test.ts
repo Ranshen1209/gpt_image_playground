@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildPartialFailure, callWithRetry, isRetryableError, runWithConcurrency } from './openaiCompatibleImageApi'
+import { buildPartialFailure, callWithRetry, isRetryableError, runImageRequestsWithRefill, runWithConcurrency } from './openaiCompatibleImageApi'
+
+const makeResult = (img: string) => ({ images: [img] })
+const retryable = (status: number) => Object.assign(new Error(`http ${status}`), { httpStatus: status })
 
 describe('runWithConcurrency', () => {
   it('保持结果顺序', async () => {
@@ -116,24 +119,68 @@ describe('callWithRetry', () => {
 })
 
 describe('buildPartialFailure', () => {
-  const settled = (statuses: Array<'fulfilled' | 'rejected'>, errMsg = 'failed') =>
-    statuses.map((status) =>
-      status === 'fulfilled'
-        ? ({ status: 'fulfilled', value: null } as PromiseFulfilledResult<unknown>)
-        : ({ status: 'rejected', reason: new Error(errMsg) } as PromiseRejectedResult),
-    )
-
-  it('全成功返回 undefined', () => {
-    expect(buildPartialFailure(settled(['fulfilled', 'fulfilled']), 2)).toBeUndefined()
+  it('无缺口返回 undefined', () => {
+    expect(buildPartialFailure(0, undefined)).toBeUndefined()
   })
-  it('全失败返回 undefined（交给 caller throw）', () => {
-    expect(buildPartialFailure(settled(['rejected', 'rejected']), 0)).toBeUndefined()
+  it('有缺口返回失败数 + 首个错误信息', () => {
+    expect(buildPartialFailure(2, new Error('上游限速'))).toEqual({ failedCount: 2, firstErrorMessage: '上游限速' })
   })
-  it('部分失败返回失败数 + 首个错误信息', () => {
-    const result = buildPartialFailure(
-      settled(['fulfilled', 'rejected', 'fulfilled', 'rejected'], '上游限速'),
-      2,
-    )
-    expect(result).toEqual({ failedCount: 2, firstErrorMessage: '上游限速' })
+  it('firstError 非 Error 时字符串化', () => {
+    expect(buildPartialFailure(1, '429')).toEqual({ failedCount: 1, firstErrorMessage: '429' })
   })
 })
+
+describe('runImageRequestsWithRefill', () => {
+  it('全成功一轮凑满，无补发', async () => {
+    let calls = 0
+    const { resultsBySlot, failedCount } = await runImageRequestsWithRefill(4, (slot) => {
+      calls++
+      return Promise.resolve(makeResult(`img-${slot}`))
+    })
+    expect(calls).toBe(4)
+    expect(failedCount).toBe(0)
+    expect(resultsBySlot.map((r) => r?.images[0])).toEqual(['img-0', 'img-1', 'img-2', 'img-3'])
+  })
+
+  it('可重试失败补发直到凑满，复用失败 slot', async () => {
+    // slot 1、3 第一次 429，补发时成功
+    const failedOnce = new Set<number>()
+    let calls = 0
+    const { resultsBySlot, failedCount } = await runImageRequestsWithRefill(4, (slot) => {
+      calls++
+      if ((slot === 1 || slot === 3) && !failedOnce.has(slot)) {
+        failedOnce.add(slot)
+        return Promise.reject(retryable(429))
+      }
+      return Promise.resolve(makeResult(`img-${slot}`))
+    })
+    expect(failedCount).toBe(0)
+    expect(calls).toBe(6) // 4 首轮 + 2 补发
+    expect(resultsBySlot.every((r) => r)).toBe(true)
+  })
+
+  it('补发预算耗尽仍不足则返回部分（failedCount>0）', async () => {
+    let calls = 0
+    const { resultsBySlot, failedCount, firstError } = await runImageRequestsWithRefill(4, (slot) => {
+      calls++
+      if (slot === 2) return Promise.reject(retryable(429)) // slot 2 永远失败
+      return Promise.resolve(makeResult(`img-${slot}`))
+    })
+    // budget factor=1 → 总尝试上限 2N=8：首轮4 + 补发slot2 共 4 次（每轮只补 slot2）直到耗尽
+    expect(calls).toBe(8)
+    expect(failedCount).toBe(1)
+    expect(resultsBySlot[2]).toBeUndefined()
+    expect((firstError as { httpStatus?: number }).httpStatus).toBe(429)
+  })
+
+  it('本轮零成功且全不可重试 → 立即停止不补发', async () => {
+    let calls = 0
+    const { failedCount } = await runImageRequestsWithRefill(3, () => {
+      calls++
+      return Promise.reject(Object.assign(new Error('moderation'), { httpStatus: 403 }))
+    })
+    expect(calls).toBe(3) // 只首轮，不补发
+    expect(failedCount).toBe(3)
+  })
+})
+

@@ -507,7 +507,7 @@
     "agentImagesGenerated": "Agent 已生成图片",
     "agentReplied": "Agent 已回复",
     "generationCompleteWithCount": "生成完成，共 {{count}} 张图片",
-    "generationPartialFailure": "完成 {{success}} 张，{{failed}} 张失败",
+    "generationPartialFailure": "目标 {{target}} 张，完成 {{success}} 张（{{failed}} 张失败）",
     "addedOutputsToInput": "已添加 {{count}} 张输出图到输入",
     "deletedRecords": "已删除 {{count}} 条记录",
     "recordDeleted": "记录已删除",
