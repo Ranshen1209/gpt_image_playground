@@ -21,7 +21,7 @@ import {
 import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
-import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId, getGroupsForApiMode } from '../lib/groupSelection'
+import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId, getGroupsForApiMode, getAvailableGroups } from '../lib/groupSelection'
 import { fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
@@ -115,24 +115,42 @@ function getImportedProfileFromMergedSettings(
 
 function GroupSelector({ mode, label, hint, onGroupChange }: { mode: 'images' | 'responses'; label: string; hint: string; onGroupChange?: () => void }) {
   const { t } = useTranslation()
-  const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([])
-  const [loading, setLoading] = useState(true)
+  // Seed synchronously from the stored OAuth token so the dropdown renders
+  // immediately. fetchResponsesApiGroups() awaits /v1/me only to ENRICH names &
+  // capabilities — and /v1/me (via authedFetch) has no timeout, so a slow/hung
+  // gateway must NOT leave the selector stuck on "加载分组...". The token already
+  // carries the groups (getAvailableGroups, sync); /v1/me is a background refine.
+  const [groups, setGroups] = useState<Array<{ id: number; name: string }>>(() => getAvailableGroups())
+  const [loading, setLoading] = useState(() => getAvailableGroups().length === 0)
   const [selectedGroupId, setSelectedGroupId] = useState<number | undefined>(() => getSelectedGroups()[mode])
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+
+    const applyResolvedDefault = (available: Array<{ id: number; name: string }>) => {
+      const storedGroupId = getSelectedGroups()[mode]
+      const resolvedGroupId = resolveSelectedGroupId(mode, available) ?? getSelectedGroupId(mode)
+      if (!resolvedGroupId) return
+      setSelectedGroupId(resolvedGroupId)
+      if (storedGroupId !== resolvedGroupId) {
+        setSelectedGroup(mode, resolvedGroupId)
+        onGroupChange?.()
+      }
+    }
+
+    // 1) Instant: render + resolve a default from the token-derived groups.
+    const seeded = getAvailableGroups()
+    if (seeded.length) {
+      applyResolvedDefault(seeded)
+      setLoading(false)
+    }
+
+    // 2) Background: enrich names/capabilities from /v1/me — never blocking.
     fetchResponsesApiGroups()
       .then((result) => {
         if (cancelled) return
         setGroups(result)
-        const storedGroupId = getSelectedGroups()[mode]
-        const resolvedGroupId = resolveSelectedGroupId(mode, result) ?? getSelectedGroupId(mode)
-        if (resolvedGroupId) {
-          setSelectedGroupId(resolvedGroupId)
-          if (storedGroupId !== resolvedGroupId) setSelectedGroup(mode, resolvedGroupId)
-          if (storedGroupId !== resolvedGroupId) onGroupChange?.()
-        }
+        applyResolvedDefault(result)
         setLoading(false)
       })
       .catch(() => {
