@@ -166,14 +166,22 @@ function groupNameLooksImage(group: SakrylleGroup): boolean {
   return name.includes('image') || name.includes('图像') || name.includes('绘图') || name.includes('画图')
 }
 
-function groupNameLooksResponses(group: SakrylleGroup): boolean {
-  const name = normalizedGroupName(group)
-  return name.includes('responses') ||
-    name.includes('response') ||
-    name.includes('plus') ||
-    name.includes('pro') ||
-    name.includes('chat') ||
-    name.includes('codex')
+// A group is an "images group" — and thus hidden from the Responses/Agent
+// selector — when its capabilities are image-only, or (lacking capability info)
+// its name looks image-oriented. A group that advertises BOTH image and
+// responses/chat capability is still treated as an image group when its name
+// looks image-oriented (e.g. "GPT-Image-2-4K"), so it stays out of Responses.
+function isImageGroup(group: SakrylleGroup): boolean {
+  const capabilities = group.capabilities ?? []
+  if (capabilities.length) {
+    const hasImageCapability = capabilities.some((capability) =>
+      capability === 'images:create' ||
+      capability === 'image_generation' ||
+      capability.includes('image'),
+    )
+    if (hasImageCapability && !groupSupportsModeByCapability(group, 'responses')) return true
+  }
+  return groupNameLooksImage(group)
 }
 
 export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: SakrylleGroup[]): SakrylleGroup[] {
@@ -190,19 +198,16 @@ export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: Sak
     return namedImageGroups.length ? namedImageGroups : []
   }
 
-  const namedResponsesGroups = groups.filter(groupNameLooksResponses)
-  if (namedResponsesGroups.length) return namedResponsesGroups
-
-  const capabilityGroups = groups.filter((group) => groupSupportsModeByCapability(group, apiMode))
-  const nonImageCapabilityGroups = capabilityGroups.filter((group) => !groupNameLooksImage(group))
-  if (nonImageCapabilityGroups.length) return nonImageCapabilityGroups
-
-  const nonImageGroups = groups.filter((group) => {
-    if (groupNameLooksImage(group) || isFallbackGroupName(group.id, group.name)) return false
+  // Responses/Agent mode: show every group that is NOT an images group —
+  // GPT-Pro / GPT-Plus, Claude, and any other non-image group, not just the
+  // GPT-named ones. Name-only generic fallback groups ("Group 11") are dropped
+  // because we can't tell what they are; capability-bearing groups are kept.
+  return groups.filter((group) => {
+    if (isImageGroup(group)) return false
     const capabilities = group.capabilities ?? []
-    return !capabilities.length || groupSupportsModeByCapability(group, apiMode)
+    if (!capabilities.length && isFallbackGroupName(group.id, group.name)) return false
+    return true
   })
-  return nonImageGroups.length ? nonImageGroups : []
 }
 
 export function resolveSelectedGroupId(apiMode: 'images' | 'responses', groups: SakrylleGroup[]): number | undefined {

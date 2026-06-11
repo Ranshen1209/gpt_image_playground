@@ -146,6 +146,30 @@ describe('getGroupsForApiMode', () => {
     expect(getGroupsForApiMode('responses', groups)).toEqual([{ id: 9, name: 'GPT-Plus' }])
   })
 
+  it('shows non-GPT groups (e.g. Claude) alongside GPT ones for Responses', () => {
+    const groups = [
+      { id: 5, name: 'GPT-Image' },
+      { id: 9, name: 'GPT-Pro' },
+      { id: 12, name: 'Claude-Max' },
+    ]
+
+    expect(getGroupsForApiMode('responses', groups)).toEqual([
+      { id: 9, name: 'GPT-Pro' },
+      { id: 12, name: 'Claude-Max' },
+    ])
+  })
+
+  it('keeps capability-bearing Responses groups regardless of name', () => {
+    const groups = [
+      { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+      { id: 12, name: 'Claude-Max', capabilities: ['messages:create', 'responses:create'] },
+    ]
+
+    expect(getGroupsForApiMode('responses', groups)).toEqual([
+      { id: 12, name: 'Claude-Max', capabilities: ['messages:create', 'responses:create'] },
+    ])
+  })
+
   it('migrates stale stored selections to a mode-appropriate group', () => {
     const groups = [
       { id: 5, name: 'GPT-Image' },
