@@ -15,6 +15,7 @@
   "dependencies": {
     "core-js": "^3.49.0",
     "fflate": "^0.8.2",
+    "heic-to": "^1.5.2",
     "i18next": "^26.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

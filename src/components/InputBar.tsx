@@ -9,6 +9,7 @@ import { getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSet
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { isLikelyHeic } from '../lib/heicConvert'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
@@ -976,7 +977,7 @@ export default function InputBar() {
       }
 
       const remaining = API_MAX_IMAGES - currentCount
-      const accepted = Array.from(files).filter((f) => f.type.startsWith('image/'))
+      const accepted = Array.from(files).filter((f) => f.type.startsWith('image/') || isLikelyHeic(f))
       const toAdd = accepted.slice(0, remaining)
       const discarded = accepted.length - toAdd.length
 

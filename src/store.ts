@@ -54,6 +54,7 @@ import {
   startsWithAgentErrorPrefix,
 } from './lib/agentSentinels'
 import { validateMaskMatchesImage } from './lib/canvasImage'
+import { isHeicFile, convertHeicToJpeg } from './lib/heicConvert'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
@@ -4633,8 +4634,20 @@ export async function addImageFromFile(file: File): Promise<void> {
 }
 
 export async function createInputImageFromFile(file: File): Promise<InputImage | null> {
-  if (!file.type.startsWith('image/')) return null
-  const dataUrl = await fileToDataUrl(file)
+  // HEIC/HEIF must be transcoded to JPEG: browsers can't render it for preview
+  // and the canvas re-encode on send can't decode it either. Detect first (the
+  // MIME check below would reject HEIC files that arrive with an empty type).
+  let source: Blob = file
+  if (await isHeicFile(file)) {
+    try {
+      source = await convertHeicToJpeg(file)
+    } catch {
+      throw new Error(i18n.t('errors.heicConvertFailed'))
+    }
+  } else if (!file.type.startsWith('image/')) {
+    return null
+  }
+  const dataUrl = await blobToDataUrl(source)
   const id = await storeImage(dataUrl, 'upload')
   cacheImage(id, dataUrl)
   return { id, dataUrl }
@@ -4643,21 +4656,20 @@ export async function createInputImageFromFile(file: File): Promise<InputImage |
 /** 添加图片到输入（右键菜单）—— 支持 data/blob/http URL */
 export async function addImageFromUrl(src: string): Promise<void> {
   const res = await fetch(src)
-  const blob = await res.blob()
-  if (!blob.type.startsWith('image/')) throw new Error(i18n.t('errors.imageNotImage'))
+  let blob = await res.blob()
+  if (await isHeicFile(blob)) {
+    try {
+      blob = await convertHeicToJpeg(blob)
+    } catch {
+      throw new Error(i18n.t('errors.heicConvertFailed'))
+    }
+  } else if (!blob.type.startsWith('image/')) {
+    throw new Error(i18n.t('errors.imageNotImage'))
+  }
   const dataUrl = await blobToDataUrl(blob)
   const id = await storeImage(dataUrl, 'upload')
   cacheImage(id, dataUrl)
   useStore.getState().addInputImage({ id, dataUrl })
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
