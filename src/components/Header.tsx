@@ -423,11 +423,11 @@ export default function Header() {
         </div>
         <div className={`safe-area-x overflow-hidden transition-all duration-300 ease-in-out lg:hidden ${appMode === 'gallery' && scrollDirection === 'down' ? 'max-h-0 opacity-0 pb-0' : 'max-h-24 opacity-100 pb-2'}`}>
           {balance && (
-            <div className="mx-2 mb-2 flex items-stretch rounded-full overflow-hidden ring-1 ring-white/50 dark:ring-white/10">
+            <div className="glass-button mx-2 mb-2 flex items-stretch rounded-full overflow-hidden">
               <button
                 type="button"
                 onClick={() => setShowSettings(true)}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0] bg-white/65 dark:bg-white/[0.06] backdrop-blur"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0] bg-transparent hover:bg-white/20 dark:hover:bg-white/[0.06] transition-colors"
               >
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-gradient-to-br from-[#b9a9da] to-[#7d6cb0]" />
                 {formatBalance(balance.creditRemaining, balance.currencyDisplay)}
@@ -435,7 +435,7 @@ export default function Header() {
               <button
                 type="button"
                 onClick={handleRecharge}
-                className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold text-white glass-button-primary border-0 rounded-none"
+                className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold text-[#5b4d8e] dark:text-[#c4b8e0] bg-transparent hover:bg-white/20 dark:hover:bg-white/[0.06] transition-colors border-l border-white/40 dark:border-white/10"
               >
                 <CoinIcon className="w-3.5 h-3.5" />
                 {t('header.rechargeLabel')}
