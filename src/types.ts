@@ -3,9 +3,68 @@
 export type ApiMode = 'images' | 'responses'
 export type AppMode = 'gallery' | 'agent'
 export type ReferenceImageEditAction = 'ask' | 'replace-reference' | 'add-mask'
-export type ApiProvider = 'openai'
+export const ZIP_DOWNLOAD_ROUTE_VALUES = [
+  'task-selection',
+  'favorite-collection-selection',
+  'image-context-menu-all',
+  'task-detail-all',
+  'task-detail-partial',
+  'agent-round-all',
+] as const
+export type ZipDownloadRoute = typeof ZIP_DOWNLOAD_ROUTE_VALUES[number]
+export const DEFAULT_ZIP_DOWNLOAD_ROUTES: ZipDownloadRoute[] = ['task-selection', 'favorite-collection-selection']
+export type BuiltInApiProvider = 'openai' | 'fal'
+export type ApiProvider = BuiltInApiProvider | string
+export type CustomProviderTemplate = 'http-image'
 export const DEFAULT_STREAM_PARTIAL_IMAGES = 1
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 15
+
+export type CustomProviderRequestMethod = 'GET' | 'POST'
+export type CustomProviderContentType = 'json' | 'multipart'
+export type CustomProviderFileSource = 'inputImages' | 'mask'
+
+export interface CustomProviderFileMapping {
+  field: string
+  source: CustomProviderFileSource
+  array?: boolean
+}
+
+export interface CustomProviderResultMapping {
+  imageUrlPaths?: string[]
+  b64JsonPaths?: string[]
+}
+
+export interface CustomProviderSubmitMapping {
+  path: string
+  method?: CustomProviderRequestMethod
+  contentType?: CustomProviderContentType
+  query?: Record<string, string>
+  body?: Record<string, unknown>
+  files?: CustomProviderFileMapping[]
+  taskIdPath?: string
+  result?: CustomProviderResultMapping
+}
+
+export interface CustomProviderPollMapping {
+  path: string
+  method?: CustomProviderRequestMethod
+  query?: Record<string, string>
+  intervalSeconds?: number
+  statusPath: string
+  successValues: string[]
+  failureValues: string[]
+  errorPath?: string
+  result: CustomProviderResultMapping
+}
+
+export interface CustomProviderDefinition {
+  id: string
+  name: string
+  template?: CustomProviderTemplate
+  submit: CustomProviderSubmitMapping
+  editSubmit?: CustomProviderSubmitMapping
+  poll?: CustomProviderPollMapping
+}
 
 export interface ApiProfile {
   id: string
@@ -26,6 +85,7 @@ export interface ApiProfile {
   streamPartialImages?: number
   /** Agent 模式图像生成使用的 profile ID（可选）。若指定，Agent 生成图像时切换到该 profile 调用 Images API */
   imageProfileId?: string
+  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages'>>>>
 }
 
 export interface AppSettings {
@@ -40,15 +100,20 @@ export interface AppSettings {
   streamImages?: boolean
   streamChatCompletionsImage?: boolean
   streamPartialImages?: number
+  customProviders: CustomProviderDefinition[]
+  providerOrder?: string[]
   clearInputAfterSubmit: boolean
   persistInputOnRestart: boolean
   reuseTaskApiProfileTemporarily: boolean
   alwaysShowRetryButton: boolean
+  taskCompletionNotification: boolean
   enterSubmit: boolean
   referenceImageEditAction: ReferenceImageEditAction
+  zipDownloadRoutes: ZipDownloadRoute[]
   agentScrollToBottomAfterSubmit: boolean
   agentMaxToolRounds: number
   agentWebSearch: boolean
+  agentMathFormattingPrompt: boolean
   profiles: ApiProfile[]
   activeProfileId: string
 }
@@ -62,6 +127,7 @@ export interface TaskParams {
   output_compression: number | null
   moderation: 'auto' | 'low'
   n: number
+  transparent_output: boolean
 }
 
 export const DEFAULT_PARAMS: TaskParams = {
@@ -71,6 +137,7 @@ export const DEFAULT_PARAMS: TaskParams = {
   output_compression: null,
   moderation: 'auto',
   n: 1,
+  transparent_output: false,
 }
 
 // ===== 输入图片（UI 层面） =====
@@ -106,18 +173,36 @@ export interface TaskRecord {
   apiMode?: ApiMode
   /** 生成时使用的模型 ID */
   apiModel?: string
+  /** fal.ai 队列请求 ID，用于连接断开后的结果恢复 */
+  falRequestId?: string
+  /** fal.ai 队列 endpoint，用于连接断开后的状态和结果查询 */
+  falEndpoint?: string
+  /** fal.ai 任务连接断开后是否等待自动恢复 */
+  falRecoverable?: boolean
+  /** 自定义异步服务商任务 ID，用于重启后继续查询结果 */
+  customTaskId?: string
+  /** 自定义异步任务是否等待自动恢复 */
+  customRecoverable?: boolean
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */
   actualParamsByImage?: Record<string, Partial<TaskParams>>
   /** 输出图片对应的 API 改写提示词，key 为 outputImages 中的图片 id */
   revisedPromptByImage?: Record<string, string>
+  /** 是否启用透明背景后处理 */
+  transparentOutput?: boolean
+  /** 实际发送给 API 的透明背景辅助提示词 */
+  transparentPrompt?: string
+  /** 透明背景后处理前的原始输出图片 id，顺序对应 outputImages */
+  transparentOriginalImages?: string[]
   /** 输入图片的 image store id 列表 */
   inputImageIds: string[]
   maskTargetImageId?: string | null
   maskImageId?: string | null
   /** 输出图片的 image store id 列表 */
   outputImages: string[]
+  /** 并发多图中失败的输出槽位，requestIndex 为从 0 开始的请求序号 */
+  outputErrors?: Array<{ requestIndex: number; error: string }>
   /** 流式生成的中间步骤图片 id 列表，仅失败时保留供排查/下载 */
   streamPartialImageIds?: string[]
   /** API 返回的原始图片 HTTP URL（非 base64 时记录） */
@@ -132,6 +217,8 @@ export interface TaskRecord {
   elapsed: number | null
   /** 是否收藏 */
   isFavorite?: boolean
+  /** 所属收藏夹 ID 列表 */
+  favoriteCollectionIds?: string[]
   /** 来源模式：画廊 / Agent */
   sourceMode?: AppMode
   /** Agent 对话 ID */
@@ -146,6 +233,13 @@ export interface TaskRecord {
   agentBatchCallId?: string
   /** Agent 图像工具实际动作 */
   agentToolAction?: 'generate' | 'edit' | 'auto' | string
+}
+
+export interface FavoriteCollection {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
 }
 
 // ===== Agent 模式 =====
@@ -219,19 +313,6 @@ export interface StoredImageThumbnail {
   height?: number
   /** 缩略图生成参数版本 */
   thumbnailVersion?: number
-}
-
-// ===== API 请求体 =====
-
-export interface ImageGenerationRequest {
-  model: string
-  prompt: string
-  size: string
-  quality: string
-  output_format: string
-  moderation: string
-  output_compression?: number
-  n?: number
 }
 
 // ===== API 响应 =====
@@ -316,6 +397,24 @@ export interface ResponsesApiResponse {
   }>
 }
 
+export interface FalImageFile {
+  url?: string
+  content_type?: string
+  file_name?: string
+  width?: number
+  height?: number
+  b64_json?: string
+  base64?: string
+  data?: string
+}
+
+export interface FalApiResponse {
+  images?: FalImageFile[]
+  image?: FalImageFile | string
+  url?: string
+  seed?: number
+}
+
 // ===== 导出数据 =====
 
 /** ZIP manifest.json 格式 */
@@ -324,6 +423,8 @@ export interface ExportData {
   exportedAt: string
   settings?: AppSettings
   tasks?: TaskRecord[]
+  favoriteCollections?: FavoriteCollection[]
+  defaultFavoriteCollectionId?: string | null
   agentConversations?: AgentConversation[]
   /** imageId → 图片信息 */
   imageFiles?: Record<string, {

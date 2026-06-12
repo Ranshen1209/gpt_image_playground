@@ -1,13 +1,13 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TaskRecord } from '../types'
-import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, updateTaskInStore, retryTask } from '../store'
+import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, retryTask } from '../store'
 import { formatImageRatio } from '../lib/size'
 import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
 import { DEFAULT_IMAGES_MODEL } from '../lib/apiProfiles'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
 import { isAgentStoppedSentinel } from '../lib/agentSentinels'
-import { CodeIcon } from './icons'
+import { CodeIcon, TransparentBgIcon } from './icons'
 import ViewportTooltip from './ViewportTooltip'
 
 interface Props {
@@ -80,6 +80,7 @@ export default function TaskCard({
   const [streamPreviewLoaded, setStreamPreviewLoaded] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
   const settings = useStore((s) => s.settings)
+  const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const streamPreviewSrc = useStore((s) => s.streamPreviews[task.id] || '')
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
@@ -313,11 +314,16 @@ export default function TaskCard({
 
   const formatDisplay = getParamDisplay(task, 'output_format')
   const showFormat = task.params.output_format !== 'png' || formatDisplay.isMismatch
+  const showTransparentOutput = task.transparentOutput || task.params.transparent_output
 
   const nDisplay = getParamDisplay(task, 'n')
   const isAgentTask = task.sourceMode === 'agent' || Boolean(task.agentConversationId || task.agentRoundId)
   const showPendingPrompt = isAgentTaskPromptPending(task)
   const showN = !isAgentTask && (task.params.n > 1 || nDisplay.isMismatch)
+  const outputErrorCount = task.outputErrors?.length ?? 0
+  const outputSuccessCount = task.outputImages?.length ?? 0
+  const requestedOutputCount = Math.max(task.params.n, outputSuccessCount + outputErrorCount)
+  const hasPartialOutputFailure = task.status === 'done' && outputErrorCount > 0
 
   const showModel = task.apiModel && task.apiModel !== DEFAULT_IMAGES_MODEL
   const isInterrupted = task.status === 'error' && isAgentStoppedSentinel(task.error)
@@ -485,9 +491,9 @@ export default function TaskCard({
                 loading="lazy"
                 alt=""
               />
-              {task.outputImages.length > 1 && (
+              {(hasPartialOutputFailure || task.outputImages.length > 1) && (
                 <span className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-                  {task.outputImages.length}
+                  {hasPartialOutputFailure ? <>{requestedOutputCount} | <span className="font-semibold text-yellow-300">{outputSuccessCount}</span></> : task.outputImages.length}
                 </span>
               )}
             </>
@@ -588,6 +594,13 @@ export default function TaskCard({
                   {t('tasks.maskRedraw')}
                 </span>
               )}
+              {/* Transparent background */}
+              {showTransparentOutput && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs flex-shrink-0">
+                  <TransparentBgIcon className="w-3 h-3 flex-shrink-0" />
+                  透明背景
+                </span>
+              )}
               {/* Params: only show if not default or mismatch */}
               {showQuality && (
                 <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-xs flex-shrink-0">
@@ -637,9 +650,7 @@ export default function TaskCard({
               )}
               <TaskActionButton
                 tooltip={task.isFavorite ? t('tasks.unfavorite') : t('tasks.favorite')}
-                onClick={() =>
-                  updateTaskInStore(task.id, { isFavorite: !task.isFavorite })
-                }
+                onClick={() => openFavoritePicker([task.id])}
                 className={`p-1.5 rounded-md transition ${
                   task.isFavorite
                     ? 'text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10'

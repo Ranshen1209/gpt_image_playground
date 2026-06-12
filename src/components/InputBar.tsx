@@ -1,8 +1,8 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, updateTaskInStore, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds } from '../store'
-import { DEFAULT_PARAMS } from '../types'
+import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
 import { getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
@@ -14,7 +14,8 @@ import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
 import { useHintTooltip } from '../hooks/useHintTooltip'
-import { downloadImageIds, formatExportFileTime } from '../lib/downloadImages'
+import { useTooltip } from '../hooks/useTooltip'
+import { downloadImageEntriesAsZip, downloadImageIds, formatExportFileTime, getTaskOutputImageZipEntries } from '../lib/downloadImages'
 import Select from './Select'
 import SizePickerModal from './SizePickerModal'
 import ViewportTooltip from './ViewportTooltip'
@@ -93,12 +94,12 @@ function getContentEditableBoundaryOffset(
   }
 
   if (!root.contains(container)) {
-    // 处理选区边界在输入框外部的情况（如 Ctrl+A）
+    // 处理输入框外的选区边界（如 Ctrl+A）
     const position = root.compareDocumentPosition(container)
     if (position & Node.DOCUMENT_POSITION_PRECEDING) return 0
     if (position & Node.DOCUMENT_POSITION_FOLLOWING) return root.textContent?.length ?? 0
 
-    // 如果是父容器，根据偏移量判断是在输入框前还是后
+    // 根据父容器偏移量判断在输入框前后
     if (container.contains(root)) {
       const children = Array.from(container.childNodes)
       const rootIndex = children.indexOf(root as any)
@@ -254,7 +255,7 @@ function setContentEditableCursor(el: HTMLElement, offset: number) {
     }
     remaining -= node.length
   }
-  // 如果偏移超出，放到末尾
+  // 偏移超出则放至末尾
   if (node) {
     const range = document.createRange()
     range.setStart(node, node.length)
@@ -337,8 +338,51 @@ function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode })
   )
 }
 
+function BatchActionButton({
+  tooltip,
+  className,
+  onClick,
+  children,
+}: {
+  tooltip: string
+  className: string
+  onClick: () => void | Promise<void>
+  children: ReactNode
+}) {
+  const tooltipState = useTooltip()
+
+  return (
+    <span className="relative inline-flex" {...tooltipState.handlers}>
+      <button
+        type="button"
+        onClick={() => {
+          tooltipState.dismiss()
+          void onClick()
+        }}
+        className={className}
+        aria-label={tooltip}
+      >
+        {children}
+      </button>
+      <ViewportTooltip visible={tooltipState.visible} className="whitespace-nowrap">
+        {tooltip}
+      </ViewportTooltip>
+    </span>
+  )
+}
+
 /** API 支持的最大参考图数量 */
 const API_MAX_IMAGES = 16
+
+function getFavoriteCollectionTasksForBatch(collectionId: string, tasks: TaskRecord[]) {
+  const favoriteTasks = tasks.filter((task) => task.isFavorite)
+  if (collectionId === ALL_FAVORITES_COLLECTION_ID) return favoriteTasks
+  return favoriteTasks.filter((task) => getTaskFavoriteCollectionIds(task).includes(collectionId))
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640)
@@ -409,11 +453,17 @@ export default function InputBar() {
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const clearSelection = useStore((s) => s.clearSelection)
+  const selectedFavoriteCollectionIds = useStore((s) => s.selectedFavoriteCollectionIds)
+  const setSelectedFavoriteCollectionIds = useStore((s) => s.setSelectedFavoriteCollectionIds)
+  const clearFavoriteCollectionSelection = useStore((s) => s.clearFavoriteCollectionSelection)
   const tasks = useStore((s) => s.tasks)
+  const favoriteCollections = useStore((s) => s.favoriteCollections)
   const agentConversations = useStore((s) => s.agentConversations)
   const activeAgentConversationId = useStore((s) => s.activeAgentConversationId)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
+  const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
+  const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const searchQuery = useStore((s) => s.searchQuery)
 
   const filteredTasks = useMemo(() => {
@@ -421,43 +471,74 @@ export default function InputBar() {
     const q = searchQuery.trim().toLowerCase()
     
     return sorted.filter((t) => {
-      if (filterFavorite && !t.isFavorite) return false
-      const matchStatus = filterStatus === 'all' || t.status === filterStatus
-      if (!matchStatus) return false
-      
-      if (!q) return true
-      const prompt = (t.prompt || '').toLowerCase()
-      const paramStr = JSON.stringify(t.params).toLowerCase()
-      return prompt.includes(q) || paramStr.includes(q)
+      if (filterFavorite) {
+        if (!t.isFavorite) return false
+        if (activeFavoriteCollectionId && activeFavoriteCollectionId !== ALL_FAVORITES_COLLECTION_ID && !getTaskFavoriteCollectionIds(t).includes(activeFavoriteCollectionId)) return false
+      }
+      if (!taskMatchesFilterStatus(t, filterStatus)) return false
+      return taskMatchesSearchQuery(t, q)
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId])
 
-  const handleSelectAllToggle = useCallback(() => {
-    if (selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0) {
-      clearSelection()
-    } else {
-      setSelectedTaskIds(filteredTasks.map((t) => t.id))
-    }
-  }, [selectedTaskIds.length, filteredTasks, clearSelection, setSelectedTaskIds])
+  const inCollectionOverview = filterFavorite && !activeFavoriteCollectionId
+
+  const favoriteCollectionCards = useMemo(() => {
+    return [
+      {
+        id: ALL_FAVORITES_COLLECTION_ID,
+        name: '全部',
+        tasks: getFavoriteCollectionTasksForBatch(ALL_FAVORITES_COLLECTION_ID, tasks),
+      },
+      ...favoriteCollections.map((collection) => ({
+        id: collection.id,
+        name: collection.name,
+        collection,
+        tasks: getFavoriteCollectionTasksForBatch(collection.id, tasks),
+      })),
+    ]
+  }, [favoriteCollections, tasks])
+
+  const filteredFavoriteCollectionCards = useMemo(() => {
+    if (!searchQuery.trim()) return favoriteCollectionCards
+    const lowerQuery = searchQuery.toLowerCase()
+    return favoriteCollectionCards.filter((collection) => collection.name.toLowerCase().includes(lowerQuery))
+  }, [favoriteCollectionCards, searchQuery])
+
+  const handleSelectAllVisibleTasks = useCallback(() => {
+    setSelectedTaskIds(filteredTasks.map((task) => task.id))
+  }, [filteredTasks, setSelectedTaskIds])
+
+  const handleInvertVisibleTasks = useCallback(() => {
+    const visibleIds = new Set(filteredTasks.map((task) => task.id))
+    setSelectedTaskIds((current) => {
+      const currentSet = new Set(current)
+      const next = current.filter((id) => !visibleIds.has(id))
+      filteredTasks.forEach((task) => {
+        if (!currentSet.has(task.id)) next.push(task.id)
+      })
+      return next
+    })
+  }, [filteredTasks, setSelectedTaskIds])
+
+  const handleSelectAllVisibleFavoriteCollections = useCallback(() => {
+    setSelectedFavoriteCollectionIds(filteredFavoriteCollectionCards.map((collection) => collection.id))
+  }, [filteredFavoriteCollectionCards, setSelectedFavoriteCollectionIds])
+
+  const handleInvertVisibleFavoriteCollections = useCallback(() => {
+    const visibleIds = new Set(filteredFavoriteCollectionCards.map((collection) => collection.id))
+    setSelectedFavoriteCollectionIds((current) => {
+      const currentSet = new Set(current)
+      const next = current.filter((id) => !visibleIds.has(id))
+      filteredFavoriteCollectionCards.forEach((collection) => {
+        if (!currentSet.has(collection.id)) next.push(collection.id)
+      })
+      return next
+    })
+  }, [filteredFavoriteCollectionCards, setSelectedFavoriteCollectionIds])
 
   const handleToggleFavorite = useCallback(() => {
-    const selectedTasks = tasks.filter((t) => selectedTaskIds.includes(t.id))
-    const allFavorite = selectedTasks.length > 0 && selectedTasks.every((t) => t.isFavorite)
-    const newFavoriteState = !allFavorite
-    setConfirmDialog({
-      title: newFavoriteState ? t('input.batchFavoriteTitle') : t('input.batchUnfavoriteTitle'),
-      message: newFavoriteState
-        ? t('input.batchFavoriteMessage', { count: selectedTaskIds.length })
-        : t('input.batchUnfavoriteMessage', { count: selectedTaskIds.length }),
-      confirmText: newFavoriteState ? t('input.batchFavoriteConfirm') : t('input.batchUnfavoriteConfirm'),
-      action: () => {
-        selectedTaskIds.forEach((id) => {
-          updateTaskInStore(id, { isFavorite: newFavoriteState })
-        })
-        clearSelection()
-      },
-    })
-  }, [tasks, selectedTaskIds, clearSelection, setConfirmDialog])
+    openFavoritePicker(selectedTaskIds)
+  }, [openFavoritePicker, selectedTaskIds])
 
   const handleDeleteSelected = useCallback(() => {
     setConfirmDialog({
@@ -479,7 +560,10 @@ export default function InputBar() {
 
     try {
       const timeStr = formatExportFileTime(new Date())
-      const { successCount, failCount } = await downloadImageIds(imageIds, `batch-${timeStr}`)
+      const fileNameBase = `batch-${timeStr}`
+      const { successCount, failCount } = settings.zipDownloadRoutes.includes('task-selection')
+        ? await downloadImageEntriesAsZip(getTaskOutputImageZipEntries(selectedTasks), fileNameBase)
+        : await downloadImageIds(imageIds, fileNameBase)
 
       if (successCount === 0) {
         showToast(t('input.downloadFailed'), 'error')
@@ -493,10 +577,86 @@ export default function InputBar() {
       showToast(t('input.downloadFailed'), 'error')
     }
     clearSelection()
-  }, [tasks, selectedTaskIds, showToast, clearSelection])
+  }, [tasks, selectedTaskIds, settings.zipDownloadRoutes, showToast, clearSelection])
+
+  const handleDownloadSelectedFavoriteCollections = useCallback(async () => {
+    const selectedIdSet = new Set(selectedFavoriteCollectionIds)
+    const selectedCollections = favoriteCollectionCards.filter((collection) => selectedIdSet.has(collection.id))
+    if (selectedCollections.length === 0) return
+
+    let successCount = 0
+    let failCount = 0
+    let downloadedCollectionCount = 0
+    const useZipDownload = settings.zipDownloadRoutes.includes('favorite-collection-selection')
+    const timeStr = formatExportFileTime(new Date())
+
+    try {
+      for (const collection of selectedCollections) {
+        const entries = getTaskOutputImageZipEntries(collection.tasks)
+        if (entries.length === 0) continue
+        const zipName = collection.id === ALL_FAVORITES_COLLECTION_ID
+          ? `favorites-all-${timeStr}`
+          : `favorites-${collection.name}-${timeStr}`
+        const result = useZipDownload
+          ? await downloadImageEntriesAsZip(entries, zipName)
+          : await downloadImageIds(entries.map((entry) => entry.imageId), zipName)
+        successCount += result.successCount
+        failCount += result.failCount
+        if (result.successCount > 0) downloadedCollectionCount++
+        if (selectedCollections.length > 1) await delay(100)
+      }
+
+      if (successCount === 0) {
+        showToast('选中的收藏夹没有图片', 'info')
+      } else if (failCount > 0) {
+        showToast(`部分下载失败：成功 ${successCount}，失败 ${failCount}`, 'error')
+      } else {
+        showToast(useZipDownload && downloadedCollectionCount > 1 ? `下载成功：${downloadedCollectionCount} 个压缩包，${successCount} 张图片` : `下载成功：${successCount} 张图片`, 'success')
+      }
+    } catch (err) {
+      console.error(err)
+      showToast('下载失败', 'error')
+    }
+    clearFavoriteCollectionSelection()
+  }, [clearFavoriteCollectionSelection, favoriteCollectionCards, selectedFavoriteCollectionIds, settings.zipDownloadRoutes, showToast])
+
+  const handleDeleteSelectedFavoriteCollections = useCallback(() => {
+    const selectedIdSet = new Set(selectedFavoriteCollectionIds)
+    const selectedCollections = favoriteCollections.filter((collection) => selectedIdSet.has(collection.id))
+    if (selectedCollections.length === 0) {
+      showToast('没有可删除的收藏夹', 'info')
+      return
+    }
+    if (favoriteCollections.length - selectedCollections.length < 1) {
+      showToast('至少保留一个收藏夹', 'error')
+      return
+    }
+
+    const selectedCollectionIds = new Set(selectedCollections.map((collection) => collection.id))
+    const imageCount = new Set(
+      tasks
+        .filter((task) => getTaskFavoriteCollectionIds(task).some((id) => selectedCollectionIds.has(id)))
+        .flatMap((task) => task.outputImages || []),
+    ).size
+    setConfirmDialog({
+      title: '批量删除收藏夹',
+      message: `确定要删除选中的 ${selectedCollections.length} 个收藏夹吗？`,
+      checkbox: imageCount > 0
+        ? {
+            label: `同时删除收藏夹中的图片（${imageCount} 张）`,
+            tone: 'danger',
+          }
+        : undefined,
+      action: async (deleteImages = false) => {
+        for (const collection of selectedCollections) {
+          await deleteFavoriteCollection(collection.id, deleteImages)
+        }
+        clearFavoriteCollectionSelection()
+      },
+    })
+  }, [clearFavoriteCollectionSelection, favoriteCollections, selectedFavoriteCollectionIds, setConfirmDialog, showToast, tasks])
 
   const maskDraft = useStore((s) => s.maskDraft)
-  const clearMaskDraft = useStore((s) => s.clearMaskDraft)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
 
@@ -504,6 +664,7 @@ export default function InputBar() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const replaceFileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
+  const prevHeightRef = useRef(42)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
 
@@ -641,10 +802,13 @@ export default function InputBar() {
     setPrompt(getContentEditablePlainText(el))
   }, [setPrompt])
   const activeProvider = activeProfile.provider
-  const isFalProvider = false
-  const agentAutoImageCount = appMode === 'agent' && activeProfile.provider === 'openai'
-  const moderationDisabled = false
-  const compressionDisabled = params.output_format === 'png'
+  const isFalProvider = activeProvider === 'fal'
+  const agentAutoImageCount = appMode === 'agent' && activeProfile.provider === 'openai' && activeProfile.apiMode === 'responses'
+  const moderationDisabled = isFalProvider
+  const transparentOutputAvailable = appMode === 'gallery'
+  const showTransparentOutputControl = transparentOutputAvailable && params.output_format === 'png'
+  const transparentOutputEnabled = transparentOutputAvailable && showTransparentOutputControl && params.transparent_output
+  const compressionDisabled = params.output_format === 'png' || isFalProvider
   const outputImageLimit = getOutputImageLimitForSettings(effectiveSettings)
   const isFalTextToImage = false
   const nDraftValue = Number(nInput)
@@ -663,6 +827,10 @@ export default function InputBar() {
   ]
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const uploadImageTooltipText = atImageLimit ? t('input.uploadImageTooltipLimit', { limit: API_MAX_IMAGES }) : t('input.uploadImage')
+  const transparentOutputHint = useHintTooltip()
+  const handleTransparentOutputMenuOpenChange = useCallback((open: boolean) => {
+    if (open) transparentOutputHint.hide()
+  }, [transparentOutputHint.hide])
   const compressionHint = useHintTooltip({ enabled: () => compressionDisabled })
   const moderationHint = useHintTooltip({ enabled: () => moderationDisabled })
   const sizeHint = useHintTooltip({ enabled: () => false })
@@ -754,7 +922,8 @@ export default function InputBar() {
 
   const insertPromptTextAtSelection = useCallback((text: string) => {
     const el = textareaRef.current
-    if (el) {
+    // 换行文本改用 state 渲染以避免 execCommand 插入 <br>/<div> 导致高度和换行异常
+    if (el && !text.includes('\n')) {
       el.focus()
       if (document.execCommand('insertText', false, text)) {
         syncPromptFromContentEditable()
@@ -1265,50 +1434,46 @@ export default function InputBar() {
     const el = textareaRef.current
     if (!el) return
 
-    // contentEditable 自动增高，只需判断是否超过最大高度以设置 overflow
-    const maxH = window.innerHeight * 0.3
-    const currentH = el.scrollHeight
+    // 计算图片区域等固定高度
+    const imagesHeight = imagesRef.current?.offsetHeight ?? 0
+    const fixedOverhead = imagesHeight + 140
+
+    // 最大高度限制在页面 40% 减固定开销，不小于 80px
+    const maxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
+
+    // 1. 清零高度以获取真实文本高度
+    el.style.transition = 'none'
+    el.style.height = '0'
+    el.style.overflowY = 'hidden'
+    const scrollH = el.scrollHeight
 
     // 判断是否只有一行
     const placeholderEl = el.parentElement?.querySelector('.prompt-placeholder')
     const placeholderH = placeholderEl ? placeholderEl.scrollHeight : 0
     const minH = Math.max(42, placeholderH)
-    setIsSingleLine(currentH <= minH)
+    const desired = scrollH
+    const targetH = Math.min(desired, maxH)
 
-    // 超过最大高度时启用滚动
-    el.style.overflowY = currentH > maxH ? 'auto' : 'hidden'
+    // 判断是否为单行
+    setIsSingleLine(desired <= minH)
 
-    // 确保光标可见（滚动到光标位置）
-    if (currentH > maxH) {
-      window.requestAnimationFrame(() => {
-        const sel = window.getSelection()
-        if (!sel || sel.rangeCount === 0) return
-        try {
-          const range = sel.getRangeAt(0)
-          if (!el.contains(range.startContainer)) return
-          const rect = range.getBoundingClientRect()
-          const elRect = el.getBoundingClientRect()
+    // 2. 回设旧高度并重绘以准备触发动画
+    el.style.height = prevHeightRef.current + 'px'
+    void el.offsetHeight
 
-          // 光标在可视区域下方，向下滚动
-          if (rect.bottom > elRect.bottom - 10) {
-            el.scrollTop += rect.bottom - elRect.bottom + 20
-          }
-          // 光标在可视区域上方，向上滚动
-          if (rect.top < elRect.top + 10) {
-            el.scrollTop -= elRect.top - rect.top + 20
-          }
-        } catch {
-          // ignore
-        }
-      })
-    }
+    // 3. 恢复平滑过渡并设置新目标高度
+    el.style.transition = 'height 150ms ease, border-color 200ms, box-shadow 200ms'
+    el.style.height = targetH + 'px'
+    el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
+
+    prevHeightRef.current = targetH
   }, [])
 
-  // 将 prompt 同步渲染到 contentEditable（含胶囊 tag）
+  // 同步 prompt 至 contentEditable
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    // 用户正在输入时不重新渲染 DOM，避免光标跳动
+    // 输入时不重复渲染以防光标跳动
     if (isUserInputRef.current) {
       isUserInputRef.current = false
       return
@@ -1326,11 +1491,27 @@ export default function InputBar() {
     }
   }, [prompt, inputImages])
 
+  // 补 <br> 哨兵避免 pre-wrap 吃掉行尾 \n，同时不影响纯文本读取。
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const last = el.lastChild
+    const hasSentinel = last instanceof HTMLBRElement && last.dataset.sentinelBr === 'true'
+    const needSentinel = prompt.endsWith('\n')
+    if (needSentinel && !hasSentinel) {
+      const br = document.createElement('br')
+      br.dataset.sentinelBr = 'true'
+      el.appendChild(br)
+    } else if (!needSentinel && hasSentinel) {
+      last.remove()
+    }
+  }, [prompt, inputImages])
+
   useEffect(() => {
     adjustTextareaHeight()
-  }, [prompt, inputImages, adjustTextareaHeight])
+  }, [prompt, inputImages, adjustTextareaHeight, isMobile, mobileCollapsed])
 
-  // 监听 selectionchange 以在光标移动时更新位置（contentEditable 的 onSelect 不可靠）
+  // 监听 selectionchange 更新光标位置（onSelect 在 contentEditable 下不可靠）
   useEffect(() => {
     const handleSelectionChange = () => {
       const el = textareaRef.current
@@ -1361,16 +1542,16 @@ export default function InputBar() {
     return () => document.removeEventListener('selectionchange', handleSelectionChange)
   }, [])
 
-  // 点击屏幕外部、空白处、卡片间隙等，使输入栏相关输入框失焦
+  // 点击外部时使 input 栏失焦
   useEffect(() => {
     const handleGlobalMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       if (!target) return
 
       if (document.activeElement instanceof HTMLElement) {
-        // 如果当前聚焦的元素属于输入栏（主输入框、数量或压缩率输入框等）
+        // 若当前聚焦在输入栏内
         if (document.activeElement.closest('[data-input-bar]')) {
-          // 如果点击的区域不在输入栏内部
+          // 若点击在输入栏外部
           if (!target.closest('[data-input-bar]')) {
             document.activeElement.blur()
           }
@@ -1816,7 +1997,12 @@ export default function InputBar() {
         <span className="text-gray-400 dark:text-gray-500 ml-1">{t('input.format')}</span>
         <Select
           value={params.output_format}
-          onChange={(val) => setParams({ output_format: val as any })}
+          onChange={(val) => {
+            setParams({
+              output_format: val as any,
+              ...(val === 'png' ? { output_compression: null } : { transparent_output: false }),
+            })
+          }}
           options={[
             { label: 'PNG', value: 'png' },
             { label: 'JPEG', value: 'jpeg' },
@@ -1825,36 +2011,67 @@ export default function InputBar() {
           className={selectClass}
         />
       </label>
-      <label
-        className="relative flex flex-col gap-0.5"
-        onMouseEnter={compressionHint.show}
-        onMouseLeave={compressionHint.hide}
-        onTouchStart={compressionHint.startTouch}
-        onTouchEnd={compressionHint.clearTimer}
-        onTouchCancel={compressionHint.hide}
-        onClick={compressionHint.show}
-      >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">{t('input.compression')}</span>
-        <input
-          value={outputCompressionInput}
-          onChange={(e) => setOutputCompressionInput(e.target.value)}
-          onBlur={commitOutputCompression}
-          disabled={compressionDisabled}
-          type="number"
-          min={0}
-          max={100}
-          placeholder={t('input.compressionPlaceholder')}
-          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
-            compressionDisabled
-              ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-              : 'bg-white/50 dark:bg-white/[0.03]'
-            }`}
-        />
-        <ButtonTooltip
-          visible={compressionHint.visible}
-          text={t('input.compressionDisabledTip')}
-        />
-      </label>
+      {showTransparentOutputControl ? (
+        <label
+          className="relative flex flex-col gap-0.5"
+          onMouseEnter={transparentOutputHint.show}
+          onMouseLeave={transparentOutputHint.hide}
+          onTouchStart={transparentOutputHint.startTouch}
+          onTouchEnd={transparentOutputHint.clearTimer}
+          onTouchCancel={transparentOutputHint.hide}
+          onClick={transparentOutputHint.show}
+        >
+          <span className="text-gray-400 dark:text-gray-500 ml-1">透明背景</span>
+          <Select
+            value={transparentOutputEnabled ? 'on' : 'off'}
+            onChange={(val) => {
+              if (!transparentOutputAvailable) return
+              setParams({ transparent_output: val === 'on', output_compression: null })
+            }}
+            options={[
+              { label: 'false', value: 'off' },
+              { label: 'true', value: 'on' },
+            ]}
+            className={selectClass}
+            onOpenChange={handleTransparentOutputMenuOpenChange}
+          />
+          <ButtonTooltip
+            visible={transparentOutputHint.visible}
+            text="基于提示词与后处理，并非模型原生生成"
+          />
+        </label>
+      ) : (
+        <label
+          className="relative flex flex-col gap-0.5"
+          onMouseEnter={compressionHint.show}
+          onMouseLeave={compressionHint.hide}
+          onTouchStart={compressionHint.startTouch}
+          onTouchEnd={compressionHint.clearTimer}
+          onTouchCancel={compressionHint.hide}
+          onClick={compressionHint.show}
+        >
+          <span className="text-gray-400 dark:text-gray-500 ml-1">{t('input.compression')}</span>
+          <input
+            value={outputCompressionInput}
+            onChange={(e) => setOutputCompressionInput(e.target.value)}
+            onBlur={commitOutputCompression}
+            disabled={compressionDisabled}
+            type="number"
+            min={0}
+            max={100}
+            placeholder={t('input.compressionPlaceholder')}
+            className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+              compressionDisabled
+                ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
+                : 'bg-white/50 dark:bg-white/[0.03]'
+              }`}
+          />
+          <ButtonTooltip
+            visible={compressionHint.visible}
+            text={isFalProvider ? 'fal.ai 不支持压缩率参数' : t('input.compressionDisabledTip')}
+          />
+        </label>
+      )}
       <label
         className="relative flex flex-col gap-0.5"
         onMouseEnter={moderationHint.show}
@@ -1931,6 +2148,9 @@ export default function InputBar() {
     </div>
   )
 
+  const showFavoriteCollectionBatchBar = inCollectionOverview && selectedFavoriteCollectionIds.length > 0
+  const showTaskBatchBar = !showFavoriteCollectionBatchBar && selectedTaskIds.length > 0
+
   return (
     <>
       {/* 全屏拖拽遮罩 */}
@@ -1976,41 +2196,101 @@ export default function InputBar() {
         />
       )}
 
-      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-5xl px-4 sm:px-6 transition-all duration-300">
-        {selectedTaskIds.length > 0 && (
+      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
+        {showFavoriteCollectionBatchBar && (
           <div className="flex justify-center mb-3">
             <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
-              <button
-                onClick={clearSelection}
+              <BatchActionButton
+                onClick={clearFavoriteCollectionSelection}
                 className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
-                title={t('input.deselect')}
+                tooltip={t('input.deselect')}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-              </button>
+              </BatchActionButton>
               <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
-              <button
-                onClick={handleSelectAllToggle}
+              <BatchActionButton
+                onClick={handleSelectAllVisibleFavoriteCollections}
                 className="p-2 text-[#9181bd] dark:text-[#c4b8e0] hover:text-[#7d6cb0] dark:hover:text-[#c4b8e0] transition-colors"
-                title={selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0 ? t('input.deselectAll') : t('input.selectAll')}
+                tooltip="全选收藏夹"
               >
-                {selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0 ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <path d="M9 12l2 2 4-4" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                    <path strokeDasharray="4 4" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
-                  </svg>
-                )}
-              </button>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <path d="M9 12l2 2 4-4" />
+                </svg>
+              </BatchActionButton>
+              <BatchActionButton
+                onClick={handleInvertVisibleFavoriteCollections}
+                className="p-2 text-purple-500 dark:text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 transition-colors"
+                tooltip="反选收藏夹"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path strokeDasharray="4 4" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
+                  <path d="M8 12h8M13 9l3 3-3 3" />
+                </svg>
+              </BatchActionButton>
               <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
-              <button
+              <BatchActionButton
+                onClick={handleDownloadSelectedFavoriteCollections}
+                className="p-2 text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+                tooltip="下载选中"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </BatchActionButton>
+              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <BatchActionButton
+                onClick={handleDeleteSelectedFavoriteCollections}
+                className="p-2 text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+                tooltip="删除选中"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </BatchActionButton>
+            </div>
+          </div>
+        )}
+        {showTaskBatchBar && (
+          <div className="flex justify-center mb-3">
+            <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
+              <BatchActionButton
+                onClick={clearSelection}
+                className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                tooltip="取消选择"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </BatchActionButton>
+              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <BatchActionButton
+                onClick={handleSelectAllVisibleTasks}
+                className="p-2 text-[#9181bd] dark:text-[#c4b8e0] hover:text-[#7d6cb0] dark:hover:text-[#c4b8e0] transition-colors"
+                tooltip="全选任务"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <path d="M9 12l2 2 4-4" />
+                </svg>
+              </BatchActionButton>
+              <BatchActionButton
+                onClick={handleInvertVisibleTasks}
+                className="p-2 text-purple-500 dark:text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 transition-colors"
+                tooltip="反选任务"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path strokeDasharray="4 4" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
+                  <path d="M8 12h8M13 9l3 3-3 3" />
+                </svg>
+              </BatchActionButton>
+              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <BatchActionButton
                 onClick={handleToggleFavorite}
                 className="p-2 text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors"
-                title={t('input.favoriteToggle')}
+                tooltip={t('input.favoriteToggle')}
               >
                 {selectedTaskIds.length > 0 && selectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite) ? (
                   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -2021,27 +2301,27 @@ export default function InputBar() {
                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                   </svg>
                 )}
-              </button>
+              </BatchActionButton>
               <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
-              <button
+              <BatchActionButton
                 onClick={handleDownloadSelected}
                 className="p-2 text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
-                title={t('input.batchDownload')}
+                tooltip={t('input.batchDownload')}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-              </button>
+              </BatchActionButton>
               <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
-              <button
+              <BatchActionButton
                 onClick={handleDeleteSelected}
                 className="p-2 text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
-                title={t('input.deleteSelected')}
+                tooltip={t('input.deleteSelected')}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
-              </button>
+              </BatchActionButton>
             </div>
           </div>
         )}
@@ -2250,7 +2530,6 @@ export default function InputBar() {
                   onMouseEnter={() => setAttachHover(true)}
                   onMouseLeave={() => setAttachHover(false)}
                 >
-                  <ButtonTooltip visible={attachHover} text={uploadImageTooltipText} />
                   <button
                     onClick={() => {
                       if (!atImageLimit) {

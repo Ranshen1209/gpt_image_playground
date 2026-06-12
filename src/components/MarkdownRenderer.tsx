@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Components, StreamdownTranslations } from 'streamdown'
+import type { Components, MathPlugin, StreamdownTranslations } from 'streamdown'
 import type { Components as ReactMarkdownComponents } from 'react-markdown'
 
 type MarkdownRendererProps = {
@@ -16,9 +16,12 @@ type LegacyMarkdownModule = {
   ReactMarkdown: ReactMarkdownComponent
   remarkGfm: RemarkGfmPlugin
 }
+type MathMarkdownModule = {
+  math: MathPlugin
+}
 type MarkdownRendererState =
   | { type: 'loading' }
-  | { type: 'modern'; Component: StreamdownComponent }
+  | { type: 'modern'; Component: StreamdownComponent; math: MathMarkdownModule }
   | { type: 'legacy'; module: LegacyMarkdownModule }
   | { type: 'plain' }
 
@@ -104,14 +107,26 @@ function loadLegacyMarkdown() {
 function loadMarkdownRenderer() {
   if (!canLoadStreamdown) return loadLegacyMarkdown()
 
-  streamdownPromise ??= import('streamdown')
-    .then((module) => ({ type: 'modern' as const, Component: module.Streamdown }))
+  streamdownPromise ??= Promise.all([
+    import('streamdown'),
+    import('@streamdown/math'),
+  ])
+    .then(([streamdown, math]) => ({
+      type: 'modern' as const,
+      Component: streamdown.Streamdown,
+      math: {
+        math: math.createMathPlugin({
+          errorColor: 'var(--muted-foreground)',
+          singleDollarTextMath: true,
+        }),
+      },
+    }))
     .catch((error) => {
       console.error('Streamdown failed to load:', error)
       return loadLegacyMarkdown()
     })
 
-  return streamdownPromise
+  return streamdownPromise!
 }
 
 function PlainTextMarkdown({ content, className = '' }: MarkdownRendererProps) {
@@ -202,6 +217,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
       lineNumbers={false}
       mode={streaming ? 'streaming' : 'static'}
       parseIncompleteMarkdown={streaming}
+      plugins={{ math: renderer.math.math }}
       skipHtml
       translations={localizedTranslations}
       urlTransform={safeUrl}

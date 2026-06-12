@@ -161,7 +161,59 @@ export const IMAGE_SIZE_TIER_PIXEL_BUDGET: Record<SizeTier, number> = {
 
 const MAX_RATIO_ERROR = 0.01
 
+// Common display-resolution presets per tier/ratio (upstream). calculateImageSize
+// returns these for exact common ratios so e.g. 16:9 @ 1K → 1280x720.
+type PresetRatio = '1:1' | '3:2' | '2:3' | '16:9' | '9:16' | '4:3' | '3:4' | '21:9'
+const COMMON_SIZE_PRESETS: Record<SizeTier, Record<PresetRatio, string>> = {
+  '1K': {
+    '1:1': '1024x1024',
+    '3:2': '1536x1024',
+    '2:3': '1024x1536',
+    '16:9': '1280x720',
+    '9:16': '720x1280',
+    '4:3': '1024x768',
+    '3:4': '768x1024',
+    '21:9': '1280x544',
+  },
+  '2K': {
+    '1:1': '2048x2048',
+    '3:2': '2160x1440',
+    '2:3': '1440x2160',
+    '16:9': '2560x1440',
+    '9:16': '1440x2560',
+    '4:3': '2048x1536',
+    '3:4': '1536x2048',
+    '21:9': '2560x1088',
+  },
+  '4K': {
+    '1:1': '2880x2880',
+    '3:2': '3456x2304',
+    '2:3': '2304x3456',
+    '16:9': '3840x2160',
+    '9:16': '2160x3840',
+    '4:3': '3200x2400',
+    '3:4': '2400x3200',
+    '21:9': '3840x1600',
+  },
+}
+
+function getPresetRatioKey(ratioWidth: number, ratioHeight: number): PresetRatio | null {
+  const key = `${ratioWidth}:${ratioHeight}`
+  return key in COMMON_SIZE_PRESETS['1K'] ? key as PresetRatio : null
+}
+
 export function calculateImageSize(tier: SizeTier, ratio: string) {
+  const parsed = parseRatio(ratio)
+  if (!parsed) return null
+  const presetRatioKey = getPresetRatioKey(parsed.width, parsed.height)
+  if (presetRatioKey) return COMMON_SIZE_PRESETS[tier][presetRatioKey]
+  return calculateImageSizeByBudget(tier, ratio)
+}
+
+// Pure pixel-budget search (no common-ratio presets). Sakrylle's 1K cap uses
+// this so a square image fills the 1K budget (1248x1248) rather than snapping
+// to the 1024x1024 display preset.
+export function calculateImageSizeByBudget(tier: SizeTier, ratio: string) {
   const parsed = parseRatio(ratio)
   if (!parsed) return null
 

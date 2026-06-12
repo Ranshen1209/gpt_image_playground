@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
+import { DEFAULT_DROPDOWN_MAX_HEIGHT } from '../lib/dropdown'
 import { ChevronDownIcon, EditIcon, PlusIcon, TrashIcon, DragHandleIcon } from './icons'
 
 interface Option {
@@ -22,9 +22,10 @@ interface SelectProps {
   options: Option[]
   disabled?: boolean
   className?: string
+  onOpenChange?: (isOpen: boolean) => void
 }
 
-export default function Select({ value, onChange, onReorder, options, disabled, className }: SelectProps) {
+export default function Select({ value, onChange, onReorder, options, disabled, className, onOpenChange }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [menuMaxHeight, setMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [placement, setPlacement] = useState<'bottom' | 'top'>('bottom')
@@ -52,6 +53,10 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
       if (dragScrollIntervalRef.current) clearInterval(dragScrollIntervalRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    onOpenChange?.(isOpen)
+  }, [isOpen, onOpenChange])
 
   useEffect(() => {
     if (!touchDragPreview) return

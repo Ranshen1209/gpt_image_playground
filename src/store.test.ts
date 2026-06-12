@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { DEFAULT_PARAMS } from './types'
-import { createDefaultOpenAIProfile, DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
+import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 import { SENTINEL_OPENAI_INTERRUPTED } from './lib/agentSentinels'
@@ -76,6 +76,30 @@ vi.mock('./lib/api', () => ({
     revisedPrompts: [],
   })),
 }))
+vi.mock('./lib/falAiImageApi', () => ({
+  getFalErrorMessage: vi.fn((err: unknown) => err instanceof Error ? err.message : String(err)),
+  getFalQueuedImageResult: vi.fn(async () => ({
+    images: [],
+    actualParams: {},
+    actualParamsList: [],
+    revisedPrompts: [],
+  })),
+}))
+vi.mock('./lib/transparentImage', () => ({
+  GREEN_KEY_COLOR: '#00FF00',
+  MAGENTA_KEY_COLOR: '#FF00FF',
+  createTransparentOutputMeta: vi.fn((prompt: string) => ({
+    transparentOutput: true,
+    effectivePrompt: `transparent:${prompt}`,
+  })),
+  getTransparentRequestParams: vi.fn((params: typeof DEFAULT_PARAMS) => ({
+    ...params,
+    output_format: 'png',
+    output_compression: null,
+    transparent_output: true,
+  })),
+  removeKeyedBackgroundFromDataUrl: vi.fn(async (dataUrl: string) => `transparent:${dataUrl}`),
+}))
 vi.mock('./lib/agentApi', () => ({
   callAgentConversationTitleApi: vi.fn(async () => '标题'),
   callAgentResponsesApi: vi.fn(() => new Promise(() => {})),
@@ -100,10 +124,12 @@ vi.mock('./lib/agentApi', () => ({
     }
   }),
 }))
-import { clearAgentConversations, clearImages, getAllAgentConversations, getAllTasks, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
+import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, getImage, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
 import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
-import { cleanStaleAgentInputDrafts, deleteAgentRoundFromConversation, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, useStore } from './store'
+import { getFalQueuedImageResult } from './lib/falAiImageApi'
+import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
+import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
@@ -165,6 +191,58 @@ async function waitForAgentRoundDone(roundId: string | null | undefined, convers
   }
   return null
 }
+
+describe('favorite collection deletion', () => {
+  const collectionA = { id: 'collection-a', name: '收藏夹 A', createdAt: 1, updatedAt: 1 }
+  const collectionB = { id: 'collection-b', name: '收藏夹 B', createdAt: 1, updatedAt: 1 }
+
+  beforeEach(async () => {
+    await clearTasks()
+    await clearImages()
+    useStore.setState({
+      tasks: [],
+      favoriteCollections: [collectionA, collectionB],
+      defaultFavoriteCollectionId: collectionA.id,
+      activeFavoriteCollectionId: collectionA.id,
+      selectedFavoriteCollectionIds: [collectionA.id],
+      selectedTaskIds: [],
+      inputImages: [],
+      galleryInputDraft: null,
+      agentConversations: [],
+      showToast: vi.fn(),
+    })
+  })
+
+  it('keeps tasks that are still referenced by another collection when deleting collection tasks', async () => {
+    const sharedTask = task({
+      id: 'shared-task',
+      isFavorite: true,
+      favoriteCollectionIds: [collectionA.id, collectionB.id],
+    })
+    const collectionOnlyTask = task({
+      id: 'collection-only-task',
+      isFavorite: true,
+      favoriteCollectionIds: [collectionA.id],
+    })
+    useStore.setState({ tasks: [sharedTask, collectionOnlyTask] })
+    await putDbTask(sharedTask)
+    await putDbTask(collectionOnlyTask)
+
+    await deleteFavoriteCollection(collectionA.id, true)
+
+    const state = useStore.getState()
+    expect(state.favoriteCollections.map((collection) => collection.id)).toEqual([collectionB.id])
+    expect(state.activeFavoriteCollectionId).toBeNull()
+    expect(state.selectedFavoriteCollectionIds).toEqual([])
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({
+      id: sharedTask.id,
+      isFavorite: true,
+      favoriteCollectionIds: [collectionB.id],
+    })
+    expect((await getAllTasks()).map((item) => item.id)).toEqual([sharedTask.id])
+  })
+})
 
 describe('mask draft lifecycle in store actions', () => {
   beforeEach(() => {
@@ -337,6 +415,141 @@ describe('mask draft lifecycle in store actions', () => {
     expect(state.reusedTaskApiProfileId).toBeNull()
   })
 
+  it('stores transparent background output after local post-processing', async () => {
+    const { callImageApi } = await import('./lib/api')
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(removeKeyedBackgroundFromDataUrl).mockClear()
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,generated'],
+      actualParams: { output_format: 'png' },
+      actualParamsList: [{ output_format: 'png' }],
+      revisedPrompts: [],
+    })
+    useStore.setState({
+      prompt: '单主体贴纸素材',
+      params: {
+        ...DEFAULT_PARAMS,
+        output_format: 'png',
+        output_compression: null,
+        transparent_output: true,
+      },
+    })
+
+    await submitTask()
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callImageApi).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'transparent:单主体贴纸素材',
+      params: expect.objectContaining({
+        output_format: 'png',
+        output_compression: null,
+        transparent_output: true,
+      }),
+    }))
+    expect(removeKeyedBackgroundFromDataUrl).toHaveBeenCalledWith('data:image/png;base64,generated')
+    const [task] = useStore.getState().tasks
+    expect(task).toMatchObject({
+      prompt: '单主体贴纸素材',
+      transparentOutput: true,
+      transparentPrompt: 'transparent:单主体贴纸素材',
+      status: 'done',
+    })
+    expect(task.transparentOriginalImages).toHaveLength(1)
+    const outputImage = await getImage(task.outputImages[0])
+    const originalImage = await getImage(task.transparentOriginalImages![0])
+    expect(outputImage?.dataUrl).toBe('transparent:data:image/png;base64,generated')
+    expect(originalImage?.dataUrl).toBe('data:image/png;base64,generated')
+    await clearTasks()
+    await clearImages()
+  })
+
+  it('falls back to the original output when transparent post-processing fails', async () => {
+    const { callImageApi } = await import('./lib/api')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(removeKeyedBackgroundFromDataUrl).mockClear()
+    vi.mocked(removeKeyedBackgroundFromDataUrl).mockRejectedValueOnce(new Error('post-process failed'))
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,generated'],
+      actualParams: { output_format: 'png' },
+      actualParamsList: [{ output_format: 'png' }],
+      revisedPrompts: [],
+    })
+    useStore.setState({
+      prompt: '单主体贴纸素材',
+      params: {
+        ...DEFAULT_PARAMS,
+        output_format: 'png',
+        output_compression: null,
+        transparent_output: true,
+      },
+    })
+
+    await submitTask()
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const [task] = useStore.getState().tasks
+    expect(task).toMatchObject({
+      transparentOutput: true,
+      status: 'done',
+    })
+    expect(task.transparentOriginalImages).toEqual([''])
+    const outputImage = await getImage(task.outputImages[0])
+    expect(outputImage?.dataUrl).toBe('data:image/png;base64,generated')
+    warnSpy.mockRestore()
+    await clearTasks()
+    await clearImages()
+  })
+
+  it('supports transparent background post-processing for fal gallery tasks', async () => {
+    const { callImageApi } = await import('./lib/api')
+    const falProfile = createDefaultFalProfile({ id: 'fal-profile', apiKey: 'fal-key' })
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(removeKeyedBackgroundFromDataUrl).mockClear()
+    vi.mocked(callImageApi).mockResolvedValueOnce({
+      images: ['data:image/png;base64,fal-generated'],
+      actualParams: { output_format: 'png' },
+      actualParamsList: [{ output_format: 'png' }],
+      revisedPrompts: [],
+    })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        profiles: [falProfile],
+        activeProfileId: falProfile.id,
+      }),
+      prompt: '单主体图标素材',
+      params: {
+        ...DEFAULT_PARAMS,
+        output_format: 'png',
+        transparent_output: true,
+      },
+    })
+
+    await submitTask()
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(callImageApi).toHaveBeenCalledWith(expect.objectContaining({
+      params: expect.objectContaining({
+        output_format: 'png',
+        transparent_output: true,
+      }),
+    }))
+    expect(removeKeyedBackgroundFromDataUrl).toHaveBeenCalledWith('data:image/png;base64,fal-generated')
+    const [task] = useStore.getState().tasks
+    expect(task.apiProvider).toBe('fal')
+    expect(task.transparentOutput).toBe(true)
+    expect(task.transparentOriginalImages).toHaveLength(1)
+    await clearTasks()
+    await clearImages()
+  })
+
   it('preserves selected image mentions when replacing a mask target with an equivalent image id', () => {
     const replacement = { id: 'image-a-replacement', dataUrl: imageA.dataUrl }
     const prompt = `参考 ${getSelectedImageMentionLabel(0)} 生成`
@@ -464,8 +677,9 @@ describe('agent conversation persistence', () => {
   it('loads agent conversations from IndexedDB and migrates legacy localStorage conversations', async () => {
     const storedConversation = agentConversation({ id: 'stored-conversation', createdAt: 1, updatedAt: 1 })
     const legacyConversation = agentConversation({ id: 'legacy-conversation', createdAt: 2, updatedAt: 2 })
-    await putAgentConversation(storedConversation)
     useStore.setState({ agentConversations: [legacyConversation], activeAgentConversationId: legacyConversation.id })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await putAgentConversation(storedConversation)
 
     await initStore()
 
@@ -567,6 +781,77 @@ describe('agent conversation persistence', () => {
     const serializedMigrated = JSON.stringify(migrated)
     expect(serializedMigrated).not.toContain('legacy-base64')
     expect(serializedMigrated).toContain('image_generation_call')
+  })
+})
+
+describe('fal task recovery', () => {
+  beforeEach(async () => {
+    await clearTasks()
+    await clearImages()
+    vi.mocked(getFalQueuedImageResult).mockClear()
+    vi.mocked(removeKeyedBackgroundFromDataUrl).mockClear()
+    const falProfile = createDefaultFalProfile({ id: 'fal-profile', apiKey: 'fal-key' })
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        profiles: [falProfile],
+        activeProfileId: falProfile.id,
+      }),
+      tasks: [],
+      inputImages: [],
+      galleryInputDraft: null,
+      agentConversations: [],
+      showToast: vi.fn(),
+    })
+  })
+
+  it('applies transparent post-processing when a fal task recovers', async () => {
+    const falTask = task({
+      id: 'fal-transparent-task',
+      apiProvider: 'fal',
+      apiProfileId: 'fal-profile',
+      apiProfileName: 'fal',
+      apiModel: 'fal-model',
+      params: {
+        ...DEFAULT_PARAMS,
+        output_format: 'png',
+        transparent_output: true,
+      },
+      transparentOutput: true,
+      transparentPrompt: 'transparent:prompt',
+      status: 'error',
+      error: '连接已断开，等待自动恢复',
+      falRequestId: 'fal-request-id',
+      falEndpoint: 'fal-endpoint',
+      falRecoverable: true,
+      finishedAt: null,
+      elapsed: null,
+    })
+    await putDbTask(falTask)
+    vi.mocked(getFalQueuedImageResult).mockResolvedValueOnce({
+      images: ['data:image/png;base64,fal-recovered'],
+      actualParams: { output_format: 'png' },
+      actualParamsList: [{ output_format: 'png' }],
+      revisedPrompts: [],
+    })
+
+    await initStore()
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(removeKeyedBackgroundFromDataUrl).toHaveBeenCalledWith('data:image/png;base64,fal-recovered')
+    const recovered = useStore.getState().tasks.find((item) => item.id === falTask.id)
+    expect(recovered).toMatchObject({
+      status: 'done',
+      falRecoverable: false,
+      transparentOutput: true,
+    })
+    expect(recovered?.transparentOriginalImages).toHaveLength(1)
+    const outputImage = await getImage(recovered!.outputImages[0])
+    const originalImage = await getImage(recovered!.transparentOriginalImages![0])
+    expect(outputImage?.dataUrl).toBe('transparent:data:image/png;base64,fal-recovered')
+    expect(originalImage?.dataUrl).toBe('data:image/png;base64,fal-recovered')
   })
 })
 
@@ -778,6 +1063,41 @@ describe('data import', () => {
       showToast: vi.fn(),
     })
     await clearAgentConversations()
+  })
+
+  it('restores favorite collections and default collection when importing task data', async () => {
+    await clearTasks()
+    const importedCollections = [
+      { id: 'imported-collection-a', name: '导入收藏夹 A', createdAt: 1, updatedAt: 1 },
+      { id: 'imported-collection-b', name: '导入收藏夹 B', createdAt: 2, updatedAt: 2 },
+    ]
+    const importedTask = task({
+      id: 'imported-favorite-task',
+      isFavorite: true,
+      favoriteCollectionIds: [importedCollections[1].id],
+    })
+
+    const imported = await importData(importFile({
+      version: 3,
+      exportedAt: new Date(0).toISOString(),
+      tasks: [importedTask],
+      favoriteCollections: importedCollections,
+      defaultFavoriteCollectionId: importedCollections[1].id,
+      imageFiles: {},
+    }), { importConfig: false, importTasks: true })
+
+    const state = useStore.getState()
+    expect(imported).toBe(true)
+    expect(state.favoriteCollections).toEqual(expect.arrayContaining(importedCollections))
+    expect(state.defaultFavoriteCollectionId).toBe(importedCollections[1].id)
+    expect(state.tasks.find((item) => item.id === importedTask.id)).toMatchObject({
+      favoriteCollectionIds: [importedCollections[1].id],
+      isFavorite: true,
+    })
+    expect((await getAllTasks()).find((item) => item.id === importedTask.id)).toMatchObject({
+      favoriteCollectionIds: [importedCollections[1].id],
+      isFavorite: true,
+    })
   })
 
   it('skips empty agent conversations when importing task data', async () => {
@@ -1474,6 +1794,196 @@ describe('agent context for removed outputs', () => {
     const serializedConversations = JSON.stringify(state.agentConversations)
     expect(serializedConversations).toContain('function_call_output')
     expect(serializedConversations).not.toContain('batch-deleted-base64')
+  })
+
+  it('clears only failed gallery tasks', async () => {
+    const failedA = task({ id: 'failed-a', status: 'error', error: '生成失败', outputImages: ['failed-image-a'] })
+    const failedB = task({ id: 'failed-b', status: 'error', error: '生成失败', outputImages: ['failed-image-b'] })
+    const done = task({ id: 'done-task', status: 'done', outputImages: ['done-image'] })
+    const running = task({ id: 'running-task', status: 'running', finishedAt: null, elapsed: null })
+    useStore.setState({
+      tasks: [failedA, done, failedB, running],
+      selectedTaskIds: ['failed-a', 'done-task', 'failed-b'],
+      showToast: vi.fn(),
+    })
+
+    await clearFailedTasks()
+
+    const state = useStore.getState()
+    expect(state.tasks.map((item) => item.id)).toEqual(['done-task', 'running-task'])
+    expect(state.selectedTaskIds).toEqual(['done-task'])
+    expect(state.showToast).toHaveBeenCalledWith('已删除 2 条记录', 'success')
+  })
+
+  it('matches partial failures in failed filters and searches error text', () => {
+    const partial = task({
+      id: 'partial-task',
+      status: 'done',
+      outputImages: ['done-image-a', 'done-image-b'],
+      outputErrors: [{ requestIndex: 2, error: 'Failed to fetch' }],
+    })
+
+    expect(taskMatchesFilterStatus(partial, 'error')).toBe(true)
+    expect(taskMatchesFilterStatus(partial, 'done')).toBe(true)
+    expect(taskMatchesSearchQuery(partial, 'failed to fetch')).toBe(true)
+  })
+
+  it('clears partial failure markers without deleting successful outputs', async () => {
+    const partial = task({
+      id: 'partial-task',
+      status: 'done',
+      outputImages: ['done-image-a'],
+      outputErrors: [{ requestIndex: 1, error: 'Failed to fetch' }],
+    })
+    useStore.setState({ tasks: [partial], selectedTaskIds: ['partial-task'], showToast: vi.fn() })
+
+    await clearFailedTasks(['partial-task'])
+
+    const state = useStore.getState()
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({ id: 'partial-task', outputImages: ['done-image-a'], outputErrors: undefined })
+    expect(state.selectedTaskIds).toEqual([])
+    expect(state.showToast).toHaveBeenCalledWith('已清除 1 条部分失败记录', 'success')
+  })
+
+  it('keeps failed tasks created after the cleanup snapshot', async () => {
+    const failedAtConfirmOpen = task({ id: 'failed-at-confirm-open', status: 'error', error: '生成失败' })
+    const failedAfterConfirmOpen = task({ id: 'failed-after-confirm-open', status: 'error', error: '生成失败' })
+    useStore.setState({ tasks: [failedAtConfirmOpen] })
+    const failedTaskIds = useStore.getState().tasks
+      .filter((item) => item.status === 'error')
+      .map((item) => item.id)
+    useStore.setState({ tasks: [failedAtConfirmOpen, failedAfterConfirmOpen] })
+
+    await clearFailedTasks(failedTaskIds)
+
+    expect(useStore.getState().tasks.map((item) => item.id)).toEqual(['failed-after-confirm-open'])
+  })
+})
+
+describe('agent built-in image tool failure', () => {
+  const responsesProfile = createDefaultOpenAIProfile({
+    id: 'responses-profile',
+    apiKey: 'test-key',
+    apiMode: 'responses',
+    model: DEFAULT_RESPONSES_MODEL,
+    streamImages: true,
+  })
+
+  beforeEach(async () => {
+    await clearTasks()
+    await clearImages()
+    await clearAgentConversations()
+    vi.mocked(callAgentResponsesApi).mockClear()
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        apiMode: 'responses',
+        model: DEFAULT_RESPONSES_MODEL,
+        streamImages: true,
+        profiles: [responsesProfile],
+        activeProfileId: responsesProfile.id,
+      }),
+      prompt: '画一张图',
+      inputImages: [],
+      maskDraft: null,
+      params: { ...DEFAULT_PARAMS },
+      appMode: 'agent',
+      tasks: [],
+      streamPreviews: {},
+      streamPreviewSlots: {},
+      agentConversations: [agentConversation({
+        id: 'conversation-a',
+        activeRoundId: null,
+        rounds: [],
+        messages: [],
+      })],
+      activeAgentConversationId: 'conversation-a',
+      agentEditingRoundId: null,
+      showToast: vi.fn(),
+    })
+  })
+
+  it('marks a started built-in image task as error when the stream fails', async () => {
+    vi.mocked(callAgentResponsesApi).mockImplementationOnce(async (opts) => {
+      await opts.onImageToolStarted?.({ toolCallId: 'ig-fail' })
+      await opts.onImagePartialImage?.({
+        toolCallId: 'ig-fail',
+        image: 'data:image/png;base64,cGFydGlhbA==',
+        partialImageIndex: 0,
+      })
+      throw new Error('image_generation failed')
+    })
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && useStore.getState().tasks[0]?.status !== 'error'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const state = useStore.getState()
+    const failedTask = state.tasks[0]
+    expect(failedTask).toMatchObject({
+      status: 'error',
+      error: 'image_generation failed',
+      agentToolCallId: 'ig-fail',
+      sourceMode: 'agent',
+    })
+    expect(state.streamPreviews[failedTask.id]).toBeUndefined()
+    expect(state.streamPreviewSlots[failedTask.id]).toBeUndefined()
+
+    const round = state.agentConversations[0].rounds[0]
+    expect(round).toMatchObject({
+      status: 'error',
+      error: 'image_generation failed',
+      outputTaskIds: [failedTask.id],
+    })
+  })
+
+  it('marks a failed built-in image task as error while the Agent stream continues', async () => {
+    vi.mocked(callAgentResponsesApi).mockImplementationOnce(async (opts) => {
+      await opts.onImageToolStarted?.({ toolCallId: 'ig-fail' })
+      await opts.onImagePartialImage?.({
+        toolCallId: 'ig-fail',
+        image: 'data:image/png;base64,cGFydGlhbA==',
+        partialImageIndex: 0,
+      })
+      await opts.onImageToolFailed?.({ toolCallId: 'ig-fail', error: 'safety rejected' })
+      opts.onTextDelta?.('图片失败，但回复继续。')
+      return {
+        text: '图片失败，但回复继续。',
+        images: [],
+        outputItems: [{ type: 'message', content: [{ type: 'output_text', text: '图片失败，但回复继续。' }] }],
+        responseId: 'response-continued',
+      }
+    })
+
+    await submitAgentMessage()
+    for (let i = 0; i < 10 && useStore.getState().agentConversations[0].rounds[0]?.status !== 'done'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    const state = useStore.getState()
+    const failedTask = state.tasks[0]
+    expect(failedTask).toMatchObject({
+      status: 'error',
+      error: 'safety rejected',
+      agentToolCallId: 'ig-fail',
+      sourceMode: 'agent',
+    })
+    expect(state.streamPreviews[failedTask.id]).toBeUndefined()
+    expect(state.streamPreviewSlots[failedTask.id]).toBeUndefined()
+
+    const round = state.agentConversations[0].rounds[0]
+    expect(round).toMatchObject({
+      status: 'done',
+      error: null,
+      outputTaskIds: [failedTask.id],
+    })
+    expect(state.agentConversations[0].messages.find((message) => message.role === 'assistant')).toMatchObject({
+      content: '图片失败，但回复继续。',
+      outputTaskIds: [failedTask.id],
+    })
   })
 })
 

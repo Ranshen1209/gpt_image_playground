@@ -270,6 +270,75 @@ describe('callImageApi', () => {
     expect(result.images).toEqual(['data:image/png;base64,ZWRpdA=='])
   })
 
+  it('suggests disabling streaming when a streaming request fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('invalid character \':\' looking for beginning of value', {
+      status: 400,
+      headers: { 'Content-Type': 'text/plain' },
+    }))
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)).rejects.toThrow('invalid character \':\' looking for beginning of value\n提示：当前使用的 API 可能不支持流式传输，请尝试关闭「流式传输」功能。')
+  })
+
+  it('preserves malformed stream event text when suggesting disabling streaming', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('data: invalid character \':\' looking for beginning of value\n\n', {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)).rejects.toThrow('invalid character \':\' looking for beginning of value\n提示：API 返回了无法解析的流式数据格式，请尝试关闭「流式传输」功能。')
+  })
+
+  it('reports malformed event-stream responses without data events', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('invalid character \':\' looking for beginning of value\n\n', {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)).rejects.toThrow('未从流式响应中解析到有效的 data 事件\n提示：API 返回了无法解析的流式数据格式，请尝试关闭「流式传输」功能。')
+  })
+
   it('does not expect revised prompts on official Images API stream completed events', async () => {
     const streamBody = [
       'data: {"created_at":1779112721,"type":"image_generation.completed","b64_json":"ZmluYWw=","background":"opaque","output_format":"jpeg","quality":"medium","sequence_number":0,"size":"1448x1086","usage":{"total_tokens":1569}}',
@@ -424,6 +493,34 @@ describe('callImageApi', () => {
     ])
   })
 
+  it('keeps successful Images API concurrent results when one request fails', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const callIndex = fetchMock.mock.calls.length
+      if (callIndex === 2) throw new TypeError('Failed to fetch')
+      return new Response(JSON.stringify({
+        data: [{ b64_json: `aW1hZ2Ut${callIndex}` }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const result = await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', codexCli: true },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 3 },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.images).toEqual([
+      'data:image/png;base64,aW1hZ2Ut1',
+      'data:image/png;base64,aW1hZ2Ut3',
+    ])
+    expect(result.failedRequests).toEqual([{ requestIndex: 1, error: 'Failed to fetch' }])
+    expect(result.actualParams).toMatchObject({ n: 2 })
+  })
+
   it('streams Responses API partial images and resolves the completed response image', async () => {
     const streamBody = [
       'data: {"type":"response.image_generation_call.partial_image","partial_image_index":0,"partial_image_b64":"cGFydGlhbA=="}',
@@ -471,6 +568,34 @@ describe('callImageApi', () => {
       actualParamsList: [{ size: '1024x1024' }],
       revisedPrompts: ['rewritten'],
     })
+  })
+
+  it('keeps successful Responses API concurrent results when one request fails', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const callIndex = fetchMock.mock.calls.length
+      if (callIndex === 3) throw new TypeError('Failed to fetch')
+      return new Response(JSON.stringify({
+        output: [{ type: 'image_generation_call', result: `aW1hZ2Ut${callIndex}` }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const result = await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', apiMode: 'responses' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 3 },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.images).toEqual([
+      'data:image/png;base64,aW1hZ2Ut1',
+      'data:image/png;base64,aW1hZ2Ut2',
+    ])
+    expect(result.failedRequests).toEqual([{ requestIndex: 2, error: 'Failed to fetch' }])
+    expect(result.actualParams).toMatchObject({ n: 2 })
   })
 
   it('parses Responses API image result objects in gallery mode', async () => {
@@ -563,6 +688,132 @@ describe('callImageApi', () => {
       '/api-proxy/images/generations',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('uses the same-origin API proxy path when API proxy is enabled and base URL is empty', async () => {
+    vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        apiProxy: true,
+        baseUrl: '',
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api-proxy/images/generations',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('uses the same-origin API proxy path for sync custom providers', async () => {
+    vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        baseUrl: '',
+        apiKey: 'test-key',
+        apiProxy: true,
+        customProviders: [{
+          id: 'custom-sync',
+          name: 'Custom Sync',
+          template: 'http-image',
+          submit: {
+            path: 'custom/images',
+            method: 'POST',
+            contentType: 'json',
+            body: { model: '$profile.model', prompt: '$prompt' },
+            result: { b64JsonPaths: ['data.*.b64_json'] },
+          },
+        }],
+        profiles: [{
+          ...DEFAULT_SETTINGS.profiles[0],
+          id: 'profile-custom-sync',
+          provider: 'custom-sync',
+          baseUrl: '',
+          apiKey: 'test-key',
+          model: 'model',
+          apiProxy: true,
+        }],
+        activeProfileId: 'profile-custom-sync',
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api-proxy/custom/images',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('rejects API proxy for async custom providers', async () => {
+    vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        baseUrl: '',
+        apiKey: 'test-key',
+        apiProxy: true,
+        customProviders: [{
+          id: 'custom-async-proxy',
+          name: 'Custom Async Proxy',
+          template: 'http-image',
+          submit: {
+            path: 'images/generations',
+            method: 'POST',
+            contentType: 'json',
+            body: { model: '$profile.model', prompt: '$prompt' },
+            taskIdPath: 'task_id',
+          },
+          poll: {
+            path: 'images/tasks/{task_id}',
+            method: 'GET',
+            intervalSeconds: 1,
+            statusPath: 'status',
+            successValues: ['done'],
+            failureValues: ['failed'],
+            result: { b64JsonPaths: ['data.*.b64_json'] },
+          },
+        }],
+        profiles: [{
+          ...DEFAULT_SETTINGS.profiles[0],
+          id: 'profile-custom-async-proxy',
+          provider: 'custom-async-proxy',
+          baseUrl: '',
+          apiKey: 'test-key',
+          model: 'model',
+          apiProxy: true,
+        }],
+        activeProfileId: 'profile-custom-async-proxy',
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    })).rejects.toThrow('异步任务的自定义服务商')
+
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('uses the same-origin API proxy path when API proxy is locked', async () => {

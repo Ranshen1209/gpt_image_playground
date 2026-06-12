@@ -6,6 +6,7 @@ import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import ViewportTooltip from './ViewportTooltip'
 import HistoryModal from './HistoryModal'
+import { useFavoriteCollectionTitle } from './FavoriteCollections'
 import { CoinIcon, EditIcon, HistoryIcon, SettingsIcon } from './icons'
 import { fetchBalance, formatBalance, type SakrylleBalance } from '../lib/sakrylleAccount'
 import { beginLogin as sakrylleBeginLogin, getStoredToken } from '../lib/sakrylleAuth'
@@ -22,7 +23,11 @@ export default function Header() {
   const agentMobileHeaderVisible = useStore((s) => s.agentMobileHeaderVisible)
   const agentConversations = useStore((s) => s.agentConversations)
   const activeAgentConversationId = useStore((s) => s.activeAgentConversationId)
+  const filterFavorite = useStore((s) => s.filterFavorite)
+  const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const activeConversation = agentConversations.find((item) => item.id === activeAgentConversationId)
+  const favoriteCollectionTitle = useFavoriteCollectionTitle()
+  const showFavoriteCollectionTitle = appMode === 'gallery' && Boolean(activeFavoriteCollectionId)
   const { hasUpdate, latestRelease, dismiss } = useVersionCheck()
   const [scrollDirection, setScrollDirection] = useState<'up' | 'down'>('up')
   const [hintVisible, setHintVisible] = useState(false)
@@ -159,37 +164,57 @@ export default function Header() {
       >
         <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between gap-2 relative">
           <div className="flex min-w-0 flex-1 items-center gap-2 pr-1 xl:pr-2">
-            <a
-              href="https://github.com/Ranshen1209/gpt_image_playground"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group flex min-w-0 items-center gap-2"
-              aria-label={t('header.appName')}
-            >
-              <span className="relative inline-flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 overflow-hidden rounded-full transition-transform group-hover:scale-105">
-                <img src="./favicon.png" alt="" className="h-full w-full object-contain select-none" draggable={false} />
-              </span>
-              <h1 className="relative inline-flex min-w-0 items-start">
-                <span className="truncate whitespace-nowrap text-[17px] font-medium tracking-tight text-gray-800 transition-colors group-hover:text-[#7d6cb0] dark:text-gray-100 dark:group-hover:text-[#c4b8e0] sm:text-lg">
-                  {t('header.appName')}
-                </span>
-                {hasUpdate && latestRelease && (
+            <h1 className="relative inline-flex min-w-0 items-start mr-2">
+              {showFavoriteCollectionTitle ? (
+                <>
+                  <span className="min-w-0 truncate whitespace-nowrap text-[17px] font-medium tracking-tight text-gray-800 dark:text-gray-100 sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
                   <a
-                    href={latestRelease.url}
+                    href="https://github.com/Ranshen1209/gpt_image_playground"
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      dismiss()
-                    }}
-                    className="absolute -right-1 -top-1 translate-x-full -translate-y-1/4 px-1 py-0.5 rounded-[4px] border border-red-500/30 text-[9px] font-black bg-red-500 text-white hover:bg-red-600 transition-all animate-fade-in leading-none shadow-sm"
-                    title={t('header.newVersionTitle', { tag: latestRelease.tag })}
+                    className="group hidden min-w-0 items-center gap-2 sm:inline-flex"
+                    aria-label={t('header.appName')}
                   >
-                    {t('header.newVersionBadge')}
+                    <span className="relative inline-flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 overflow-hidden rounded-full transition-transform group-hover:scale-105">
+                      <img src="./favicon.png" alt="" className="h-full w-full object-contain select-none" draggable={false} />
+                    </span>
+                    <span className="truncate whitespace-nowrap text-[17px] font-medium tracking-tight text-gray-800 transition-colors group-hover:text-[#7d6cb0] dark:text-gray-100 dark:group-hover:text-[#c4b8e0] sm:text-lg">
+                      {t('header.appName')}
+                    </span>
                   </a>
-                )}
-              </h1>
-            </a>
+                </>
+              ) : (
+                <a
+                  href="https://github.com/Ranshen1209/gpt_image_playground"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex min-w-0 items-center gap-2"
+                  aria-label={t('header.appName')}
+                >
+                  <span className="relative inline-flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 overflow-hidden rounded-full transition-transform group-hover:scale-105">
+                    <img src="./favicon.png" alt="" className="h-full w-full object-contain select-none" draggable={false} />
+                  </span>
+                  <span className="truncate whitespace-nowrap text-[17px] font-medium tracking-tight text-gray-800 transition-colors group-hover:text-[#7d6cb0] dark:text-gray-100 dark:group-hover:text-[#c4b8e0] sm:text-lg">
+                    {t('header.appName')}
+                  </span>
+                </a>
+              )}
+              {hasUpdate && latestRelease && (
+                <a
+                  href={latestRelease.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    dismiss()
+                  }}
+                  className="absolute -right-1 -top-1 translate-x-full -translate-y-1/4 px-1 py-0.5 rounded-[4px] border border-red-500/30 text-[9px] font-black bg-red-500 text-white hover:bg-red-600 transition-all animate-fade-in leading-none shadow-sm"
+                  title={t('header.newVersionTitle', { tag: latestRelease.tag })}
+                >
+                  {t('header.newVersionBadge')}
+                </a>
+              )}
+            </h1>
             {appMode === 'agent' && <div className="relative ml-1 hidden items-center gap-1 xl:flex">
               <button
                 ref={historyButtonRef}
@@ -230,6 +255,13 @@ export default function Header() {
               >
                 {activeConversation.title || 'Agent'}
               </button>
+            </div>
+          )}
+          {showFavoriteCollectionTitle && (
+            <div className="absolute left-1/2 top-1/2 hidden max-w-[30%] -translate-x-1/2 -translate-y-1/2 xl:flex">
+              <div className="truncate rounded px-2 py-1 text-sm font-semibold text-gray-700 dark:text-gray-300" title={favoriteCollectionTitle}>
+                {favoriteCollectionTitle}
+              </div>
             </div>
           )}
           <div className="mr-1 hidden shrink-0 items-center gap-1 rounded-2xl glass-button p-1 lg:flex xl:mr-3">
