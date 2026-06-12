@@ -310,7 +310,7 @@ export default function Header() {
                       dismissAllTooltips()
                       handleRecharge()
                     }}
-                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold glass-button border-0 rounded-full text-[#5b4d8e] dark:text-[#c4b8e0]"
+                    className="inline-flex items-center gap-1 px-3 text-xs font-semibold bg-transparent hover:bg-white/20 dark:hover:bg-white/[0.06] transition-colors border-l border-white/40 dark:border-white/10 text-[#5b4d8e] dark:text-[#c4b8e0]"
                     aria-label={t('header.rechargeAria')}
                   >
                     <CoinIcon className="w-3.5 h-3.5" />
