@@ -22,7 +22,6 @@ import {
 } from './imageApiShared'
 import { resolveBearerToken } from './oauthFallback'
 import { getSakrylleImageRequestParams } from './sakrylleImageSize'
-import { callImagesApiViaChat } from './chatCompletionsImageApi'
 
 export const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
 
@@ -39,12 +38,6 @@ function isSakrylleApiBaseUrl(baseUrl: string): boolean {
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
-}
-
-export function shouldUseChatImagePath(profile: ApiProfile): boolean {
-  if (profile.codexCli) return false
-  if (profile.apiProxy) return false
-  return profile.streamChatCompletionsImage === true && isSakrylleApiBaseUrl(profile.baseUrl)
 }
 
 /** 并发拆分子请求的最大同时在飞数。实测 api.sakrylle.com 单用户并发墙=6（7+ 触发 429
@@ -777,9 +770,6 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
 }
 
 async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
-  if (shouldUseChatImagePath(profile)) {
-    return callImagesApiViaChat(opts, profile)
-  }
   const { prompt: originalPrompt, inputImageDataUrls } = opts
   const params = getSakrylleImageRequestParams(opts.params, profile)
   const prompt = profile.codexCli

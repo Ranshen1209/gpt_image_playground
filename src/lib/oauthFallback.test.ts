@@ -173,31 +173,8 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(false)
     })
 
-    // Chat/completions image path (streamChatCompletionsImage) hits POST
-    // chat/completions, which the server gates behind chat.completions:create —
-    // a distinct scope from images:create. The token must carry it.
-    it('requires chat.completions:create for the chat image path (images:create alone is not enough)', () => {
-      const profile = createProfile({ apiMode: 'images', streamChatCompletionsImage: true })
-      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
-        accessToken: 'token',
-        expiresAt: Date.now() + 3600000,
-        scope: 'images:create responses:create',
-      })
-      expect(canUseOAuthForProfile(profile)).toBe(false)
-    })
-
-    it('returns true for the chat image path when chat.completions:create is granted', () => {
-      const profile = createProfile({ apiMode: 'images', streamChatCompletionsImage: true })
-      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
-        accessToken: 'token',
-        expiresAt: Date.now() + 3600000,
-        scope: 'images:create chat.completions:create',
-      })
-      expect(canUseOAuthForProfile(profile)).toBe(true)
-    })
-
-    it('still accepts images:create for the non-chat images path (streamChatCompletionsImage off)', () => {
-      const profile = createProfile({ apiMode: 'images', streamChatCompletionsImage: false })
+    it('accepts images:create for the images path', () => {
+      const profile = createProfile({ apiMode: 'images' })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,

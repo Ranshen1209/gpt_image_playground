@@ -65,8 +65,10 @@ const DEFAULT_EDIT_FILES: CustomProviderFileMapping[] = [
 
 type ApiProfileProviderDraft = NonNullable<ApiProfile['providerDrafts']>[ApiProvider]
 
-function getDefaultStreamImages(provider: ApiProvider, apiMode: ApiMode): boolean {
-  return provider === 'openai' && apiMode === 'responses'
+function getDefaultStreamImages(provider: ApiProvider, _apiMode: ApiMode): boolean {
+  // openai（含 Sakrylle 官方接口）默认开启流式传输：images 模式靠 partial_images
+  // 心跳维持连接防 524，responses 模式原生流式。其他服务商默认关闭。
+  return provider === 'openai'
 }
 
 export function normalizeStreamPartialImages(value: unknown, fallback: number | undefined = DEFAULT_STREAM_PARTIAL_IMAGES): number {
@@ -315,7 +317,6 @@ export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}):
     timeout: DEFAULT_API_TIMEOUT,
     codexCli: false,
     apiProxy: DEFAULT_OPENAI_API_PROXY,
-    streamChatCompletionsImage: true,
     streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
     ...overrides,
     apiMode,
@@ -477,7 +478,6 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : defaults.apiProxy,
     responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
     streamImages,
-    streamChatCompletionsImage: typeof record.streamChatCompletionsImage === 'boolean' ? record.streamChatCompletionsImage : defaults.streamChatCompletionsImage,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, defaults.streamPartialImages),
     imageProfileId: typeof record.imageProfileId === 'string' && record.imageProfileId.trim()
       ? record.imageProfileId.trim()
@@ -513,7 +513,6 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : DEFAULT_OPENAI_API_PROXY,
     responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
     streamImages: typeof record.streamImages === 'boolean' ? record.streamImages : true,
-    streamChatCompletionsImage: typeof record.streamChatCompletionsImage === 'boolean' ? record.streamChatCompletionsImage : true,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages),
   })
   const profiles = Array.isArray(record.profiles) && record.profiles.length
@@ -608,7 +607,7 @@ function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
     profile.apiMode === 'images' &&
     profile.codexCli === false &&
     profile.apiProxy === DEFAULT_OPENAI_API_PROXY &&
-    profile.streamImages === false &&
+    profile.streamImages === true &&
     profile.streamPartialImages === DEFAULT_STREAM_PARTIAL_IMAGES &&
     !profile.imageProfileId
 }
@@ -839,8 +838,7 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   apiMode: 'images',
   codexCli: false,
   apiProxy: DEFAULT_OPENAI_API_PROXY,
-  streamImages: false,
-  streamChatCompletionsImage: false,
+  streamImages: true,
   streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
   clearInputAfterSubmit: false,
   persistInputOnRestart: true,

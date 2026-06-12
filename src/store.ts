@@ -136,12 +136,10 @@ function isErrorToastTitle(title: string): boolean {
 
 export type SettingsTab = 'general' | 'agent' | 'api' | 'data' | 'about'
 
-type TimeoutStreamingHintProfile = Pick<ApiProfile, 'provider' | 'streamImages' | 'streamPartialImages' | 'streamChatCompletionsImage'>
+type TimeoutStreamingHintProfile = Pick<ApiProfile, 'provider' | 'streamImages' | 'streamPartialImages'>
 
 function getTimeoutStreamingHint(profile?: TimeoutStreamingHintProfile | null) {
   if (profile?.provider !== 'openai') return ''
-  // 走流式 chat 路径时,空闲超时已自动重试,整体超时才到这里
-  if (profile.streamChatCompletionsImage) return i18n.t('errors.timeoutHintChatOverall')
   const partialImages = profile.streamPartialImages ?? DEFAULT_SETTINGS.streamPartialImages ?? 0
   if (profile.streamImages !== true) return i18n.t('errors.timeoutHintStreaming')
   if (partialImages === 0) return i18n.t('errors.timeoutHintPartialZero')
@@ -1969,7 +1967,7 @@ function getApiRequestNetworkErrorHint(
   err: unknown,
   createdAt: number,
   usesApiProxy: boolean,
-  profile?: Pick<ApiProfile, 'provider' | 'apiMode' | 'streamImages' | 'streamPartialImages' | 'streamChatCompletionsImage'> | null,
+  profile?: Pick<ApiProfile, 'provider' | 'apiMode' | 'streamImages' | 'streamPartialImages'> | null,
 ): string | null {
   if (!isApiRequestNetworkError(err)) return null
 
@@ -4622,7 +4620,6 @@ async function executeTask(taskId: string) {
         apiMode: settingsNow.apiMode,
         streamImages: activeProfileNow.streamImages,
         streamPartialImages: activeProfileNow.streamPartialImages,
-        streamChatCompletionsImage: activeProfileNow.streamChatCompletionsImage,
       }
       const networkErrorHint = getApiRequestNetworkErrorHint(err, latestTask.createdAt, usesApiProxy, hintProfile)
       if (networkErrorHint && !messageContainsImageFetchCorsHint(errorMessage)) {

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDefaultOpenAIProfile } from './apiProfiles'
-import { buildPartialFailure, callWithRetry, isRetryableError, runImageRequestsWithRefill, runWithConcurrency, shouldUseChatImagePath } from './openaiCompatibleImageApi'
+import { buildPartialFailure, callWithRetry, isRetryableError, runImageRequestsWithRefill, runWithConcurrency } from './openaiCompatibleImageApi'
 
 const makeResult = (img: string) => ({ images: [img] })
 const retryable = (status: number) => Object.assign(new Error(`http ${status}`), { httpStatus: status })
@@ -206,20 +205,6 @@ describe('runImageRequestsWithRefill', () => {
   })
 })
 
-describe('shouldUseChatImagePath', () => {
-  it('true for Sakrylle baseUrl with flag on', () => {
-    const profile = createDefaultOpenAIProfile({ baseUrl: 'https://api.sakrylle.com/v1', streamChatCompletionsImage: true })
-    expect(shouldUseChatImagePath(profile)).toBe(true)
-  })
-  it('false when flag off', () => {
-    const profile = createDefaultOpenAIProfile({ baseUrl: 'https://api.sakrylle.com/v1', streamChatCompletionsImage: false })
-    expect(shouldUseChatImagePath(profile)).toBe(false)
-  })
-  it('false for non-Sakrylle baseUrl even with flag on', () => {
-    const profile = createDefaultOpenAIProfile({ baseUrl: 'https://api.openai.com/v1', streamChatCompletionsImage: true })
-    expect(shouldUseChatImagePath(profile)).toBe(false)
-  })
-})
 
 describe('runImageRequestsWithRefill 503 账号池早停', () => {
   it('does NOT burn refill budget when all fail with "No available compatible accounts"', async () => {

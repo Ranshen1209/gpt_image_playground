@@ -428,13 +428,13 @@ describe('custom providers', () => {
     expect(profile.model).toBe(DEFAULT_IMAGES_MODEL)
   })
 
-  it('uses API-mode specific streaming defaults and preserves partial image count', () => {
-    expect(createDefaultOpenAIProfile().streamImages).toBe(false)
+  it('defaults streaming on for OpenAI in all modes and preserves partial image count', () => {
+    expect(createDefaultOpenAIProfile().streamImages).toBe(true)
     expect(createDefaultOpenAIProfile({ apiMode: 'responses' }).streamImages).toBe(true)
     expect(createDefaultOpenAIProfile().streamPartialImages).toBe(1)
-    expect(DEFAULT_SETTINGS.streamImages).toBe(false)
+    expect(DEFAULT_SETTINGS.streamImages).toBe(true)
     expect(DEFAULT_SETTINGS.streamPartialImages).toBe(1)
-    expect(DEFAULT_SETTINGS.profiles[0].streamImages).toBe(false)
+    expect(DEFAULT_SETTINGS.profiles[0].streamImages).toBe(true)
     expect(DEFAULT_SETTINGS.profiles[0].streamPartialImages).toBe(1)
     expect(normalizeSettings({ apiMode: 'responses' }).streamImages).toBe(true)
 
@@ -587,19 +587,3 @@ describe('custom providers', () => {
   })
 })
 
-describe('streamChatCompletionsImage', () => {
-  it('defaults to true on a fresh profile', () => {
-    const profile = createDefaultOpenAIProfile()
-    expect(profile.streamChatCompletionsImage).toBe(true)
-  })
-
-  it('fills default true for a legacy profile missing the field', () => {
-    const normalized = normalizeApiProfile({ id: 'x', name: 'legacy', baseUrl: 'https://api.sakrylle.com/v1' })
-    expect(normalized.streamChatCompletionsImage).toBe(true)
-  })
-
-  it('preserves an explicit false', () => {
-    const normalized = normalizeApiProfile({ streamChatCompletionsImage: false })
-    expect(normalized.streamChatCompletionsImage).toBe(false)
-  })
-})
