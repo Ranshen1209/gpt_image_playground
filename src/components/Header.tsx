@@ -297,7 +297,7 @@ export default function Header() {
                     {formatBalance(balance.creditRemaining, balance.currencyDisplay)}
                   </button>
                   <ViewportTooltip visible={balanceTooltip.visible} className="whitespace-nowrap">
-                    {balance.username} · {balance.groupName}
+                    {[balance.username, balance.groupName].filter(Boolean).join(' · ')}
                   </ViewportTooltip>
                 </div>
                 <div
