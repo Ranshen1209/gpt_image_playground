@@ -1,5 +1,8 @@
 // Sakrylle OAuth 2.0 Authorization Code + PKCE flow.
-// 与 sub.sakrylle.com 的 /oauth/authorize、/oauth/token 端点对接。
+// 与 OAuth provider 的 /oauth/authorize、/oauth/token 端点对接。
+// OIDC 开启时（生产默认）所有端点（authorize/token/revoke/end_session）经 OIDC
+// Discovery 解析自 issuer host（oidc1.sakrylle.com），不再碰已被墙的 sub.sakrylle.com。
+// OAUTH_BASE 仅作 OIDC 关闭时的非 OIDC 回退路径默认值，已同步指向 oidc1。
 // 详见 docs/OAUTH_V2_INTEGRATION.md (§3, §5, §9)。
 // v2 canonical scopes: profile:read account:balance:read models:read images:create responses:create offline_access
 // Legacy v1 aliases (image_generation, balance:read) remain accepted during the deprecation window.
@@ -8,7 +11,7 @@ import i18n from './i18n'
 import { getDiscoveryEndpoints } from './sakrylleOidcDiscovery'
 import { readRuntimeEnv } from './runtimeEnv'
 
-const OAUTH_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_BASE) || 'https://sub.sakrylle.com'
+const OAUTH_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_BASE) || 'https://oidc1.sakrylle.com'
 const CLIENT_ID = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_CLIENT_ID) || 'sakrylle-image-playground'
 
 /** Feature flag: when 'true', enable OIDC (openid scope + id_token + Discovery). Default false. */
@@ -406,14 +409,21 @@ export function logout(): void {
 
 // RFC 7009 token revocation — docs §9.
 // Returns silently on any error (server returns 200 even for unknown tokens).
+// When OIDC is enabled, the revocation endpoint is resolved from Discovery
+// (issuer-derived, oidc1) so it never targets the GFW-blocked sub host.
 async function revokeToken(token: string, hint: 'refresh_token' | 'access_token'): Promise<void> {
   try {
+    let revocationEndpoint = `${OAUTH_BASE}/oauth/revoke`
+    if (OIDC_ENABLED) {
+      const discovery = await getDiscoveryEndpoints()
+      revocationEndpoint = discovery.revocationEndpoint
+    }
     const body = new URLSearchParams({
       token,
       token_type_hint: hint,
       client_id: CLIENT_ID,
     })
-    await fetch(`${OAUTH_BASE}/oauth/revoke`, {
+    await fetch(revocationEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,

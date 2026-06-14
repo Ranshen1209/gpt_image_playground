@@ -30,15 +30,17 @@ The source code reads Vite-style variables:
 - `VITE_SAKRYLLE_OAUTH_BASE`
 - `VITE_SAKRYLLE_OAUTH_CLIENT_ID`
 - `VITE_SAKRYLLE_OIDC_ENABLED`
+- `VITE_SAKRYLLE_OIDC_ISSUER`
 
 Docker production images bake placeholders into the bundle and replace them at container startup. Runtime container env names are intentionally shorter:
 
 | Runtime env | Meaning | Default |
 |---|---|---|
 | `DEFAULT_API_URL` | User-visible default API base URL | `https://api.sakrylle.com/v1` |
-| `OAUTH_BASE` | OAuth/OIDC provider base | `https://sub.sakrylle.com` |
+| `OAUTH_BASE` | Non-OIDC fallback OAuth base (OIDC paths resolve endpoints from discovery) | `https://oidc1.sakrylle.com` |
 | `OAUTH_CLIENT_ID` | OAuth/OIDC RP client id | `sakrylle-image-playground` |
 | `OIDC_ENABLED` | OIDC feature flag string; only `true` enables OIDC | `false` |
+| `OIDC_ISSUER` | OIDC issuer / discovery base (decoupled from `OAUTH_BASE`) | `https://oidc1.sakrylle.com` |
 
 Do not confuse Docker runtime names with Vite source variable names. In Compose, set `OIDC_ENABLED=true`; setting `VITE_SAKRYLLE_OIDC_ENABLED=true` alone will not be consumed by the runtime entrypoint.
 

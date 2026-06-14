@@ -56,9 +56,10 @@ Sakrylle 图像生成站 fork of [CookSleep/gpt_image_playground](https://github
 |---|---|---|---|
 | `VITE_DEFAULT_API_URL` | 用户可见的图像 API 默认 baseUrl（profile 可改写） | `apiProfiles.ts` `DEFAULT_BASE_URL` | → `https://api.sakrylle.com/v1` |
 | `VITE_SAKRYLLE_PLATFORM_API` | 平台 API 基址（账户/余额/模型，用户不可改） | `sakrylleAccount.ts` `SAKRYLLE_API_BASE` | → `VITE_DEFAULT_API_URL` → `https://api.sakrylle.com/v1` |
-| `VITE_SAKRYLLE_OAUTH_BASE` | OAuth / OIDC 端点 base | `sakrylleAuth.ts` `OAUTH_BASE` | → `https://sub.sakrylle.com` |
+| `VITE_SAKRYLLE_OAUTH_BASE` | OAuth 端点 base（仅 OIDC 关闭时的非 OIDC 回退路径用） | `sakrylleAuth.ts` `OAUTH_BASE` | → `https://oidc1.sakrylle.com` |
 | `VITE_SAKRYLLE_OAUTH_CLIENT_ID` | OAuth client_id | `sakrylleAuth.ts` `CLIENT_ID` | → `sakrylle-image-playground` |
 | `VITE_SAKRYLLE_OIDC_ENABLED` | OIDC feature flag (`'true'` 启用) | `sakrylleAuth.ts` `OIDC_ENABLED` | → `false`（默认关） |
+| `VITE_SAKRYLLE_OIDC_ISSUER` | OIDC issuer / discovery base（与 `OAUTH_BASE` 解耦，issuer + 全端点同源） | `sakrylleOidcDiscovery.ts` `OIDC_ISSUER` | → `https://oidc1.sakrylle.com` |
 
 构建期写入 bundle。Docker 入口 `deploy/inject-api-url.sh` 在容器启动时把占位符替换成 env。
 
@@ -66,11 +67,11 @@ Sakrylle 图像生成站 fork of [CookSleep/gpt_image_playground](https://github
 
 `VITE_SAKRYLLE_OIDC_ENABLED=true` 时启用 OpenID Connect 层，往上加在 OAuth PKCE 之上：
 
-- **OIDC Discovery** (`src/lib/sakrylleOidcDiscovery.ts`): 启动时 `GET /.well-known/openid-configuration` 获取 IdP 端点，缓存 1 小时。失败时 fallback 到硬编码端点（`OAUTH_BASE + /oauth/authorize` 等）。所有端点必须与 issuer 同源（安全校验）
+- **OIDC Discovery** (`src/lib/sakrylleOidcDiscovery.ts`): 启动时从 issuer `GET ${OIDC_ISSUER}/.well-known/openid-configuration` 获取 IdP 端点，缓存 1 小时。失败时 fallback 到硬编码端点（`OIDC_ISSUER + /oauth/authorize` 等）。所有端点必须与 issuer 同源（安全校验）。**issuer 已与 `OAUTH_BASE`(sub.sakrylle.com) 解耦** — 旧 OAuth host 被 GFW 封，OIDC 迁到独立 host `oidc1.sakrylle.com`；网关把每个端点都从单一 issuer 值派生（issuer + 全端点天然同源）。issuer 走运行时变量 `VITE_SAKRYLLE_OIDC_ISSUER`，将来 host 再被封改环境变量重启即可，不用重新构建
 - **Scopes 扩展**: 基础 v2 scopes 前追加 `openid profile email`
 - **id_token**: 授权码换取时解析 id_token JWT（不验签名），提取 `sub`/`name`/`email`/`preferred_username`。nonce 防重放。`idTokenClaims` 合并到 `/v1/me` 用户信息（作为 identity 主源）
 - **RP-Initiated Logout**: `logoutAndRevoke()` 重定向到 IdP `end_session_endpoint`，携带 `id_token_hint` + `post_logout_redirect_uri`
-- **Docker 占位符**: `__VITE_SAKRYLLE_OIDC_ENABLED_PLACEHOLDER__`，容器 env `OIDC_ENABLED`（默认 `false`）
+- **Docker 占位符**: `__VITE_SAKRYLLE_OIDC_ENABLED_PLACEHOLDER__`，容器 env `OIDC_ENABLED`（默认 `false`）；`__VITE_SAKRYLLE_OIDC_ISSUER_PLACEHOLDER__`，容器 env `OIDC_ISSUER`（默认 `https://oidc1.sakrylle.com`）
 - **参考文档**: `docs/OAUTH_V2_INTEGRATION.md`，OIDC RP 集成指南 `oidc-docs/06-oidc-rp-integration-guide.md`
 
 ## OAuth 2.0 PKCE 登录（v0.5.0 起，v2 增强 v0.10.0）
@@ -78,6 +79,7 @@ Sakrylle 图像生成站 fork of [CookSleep/gpt_image_playground](https://github
 按 `docs/OAUTH_V2_INTEGRATION.md`（v2 主文档）和 `docs/OAUTH_CLIENT_INTEGRATION.md`（v1 参考）实现。
 
 - **入口**: `src/lib/sakrylleAuth.ts` — `beginLogin()` / `handleCallback()` / `refreshIfNeeded()` / `forceRefreshToken()` / `refreshWithGroupId()` / `logout()` / `logoutAndRevoke()`
+- **端点来源**: OIDC 开启时（生产默认）`beginLogin`/`handleCallback`/`refresh`/`revoke` 四条全经 OIDC Discovery 解析自 issuer host `oidc1.sakrylle.com`（authorize/token/revocation/end_session 端点），**没有一条碰已被墙的 sub.sakrylle.com**。`OAUTH_BASE`（默认也已迁 oidc1）仅作 OIDC 关闭时的非 OIDC 回退路径默认值。网关把所有端点都从单一 issuer 派生，discovery 同时发布 `revocation_endpoint`
 - **多 Group 入口**: `src/lib/groupSelection.ts` — `getAvailableGroups()` / `ensureSelectedGroupId()` / `getGroupAccessToken()` / `fetchResponsesApiGroups()`
 - **OAuth Bearer 回退**: `src/lib/oauthFallback.ts` — `canUseOAuthForProfile()` / `resolveBearerToken()`
 - **Redirect URI**: `${window.location.origin}/oauth/callback`，SSR fallback `https://image.sakrylle.com/oauth/callback`
@@ -144,7 +146,7 @@ i18next + react-i18next。所有翻译资源 inline，不走 lazy load — bundl
 - **背景 ambient**: `body` 必须挂 `sakrylle-ambient` class（`index.html`），它给 `::before` 喷三点莫奈紫光斑做玻璃背景层。上游 rebase 若改 `body` class 要保住这个
 - **Logo**: `src/components/icons.tsx::SakrylleLogo` 是行内 SVG（紫色渐变 + 五瓣樱花 + 金色花心）。Header 左上角和 PWA icon 共用。**不要**重新引入 `public/pwa-icon.svg`
 - **Header 里被砍的**: PWA「安装为应用」按钮 + `beforeinstallprompt` 整套逻辑、「操作指南」按钮 + `HelpModal.tsx` 文件全删。Service Worker 注册仍在 `main.tsx`（PWA 离线缓存还要），只是不再主动 prompt 安装
-- **余额轮询**: `Header.tsx` `useEffect` 60s 一次拉 `fetchBalance()`，**仅 `document.visibilityState === 'visible'` 时拉**；`visibilitychange` 从 hidden → visible 立即触发一次 refresh。后台 tab 不烧网关流量。`storage` 事件监听 OAuth 登出/换号同步多 tab。充值按钮硬编码跳 `https://sub.sakrylle.com/purchase`（`SAKRYLLE_PURCHASE_URL`）
+- **余额轮询**: `Header.tsx` `useEffect` 60s 一次拉 `fetchBalance()`，**仅 `document.visibilityState === 'visible'` 时拉**；`visibilitychange` 从 hidden → visible 立即触发一次 refresh。后台 tab 不烧网关流量。`storage` 事件监听 OAuth 登出/换号同步多 tab。充值按钮硬编码跳 `https://ai1.sakrylle.com/purchase`（`SAKRYLLE_PURCHASE_URL`）—— 充值/面板走 ai1，不走已被墙的 sub
 - **关于页**: `SettingsModal.tsx` `activeTab === 'about'` 主链接指 Ranshen1209 fork，**必须保留** CookSleep 原仓库链接 + MIT 协议链接以符合署名要求。文件内有英中双语 AI 防删注释，rebase 时若上游改了致谢文案要小心 reconcile
 - **默认 baseUrl**: `apiProfiles.ts` `DEFAULT_BASE_URL` fallback 已是 `'https://api.sakrylle.com/v1'`（不再 fallback 到 openai.com）。生产部署仍建议 `VITE_DEFAULT_API_URL` 显式注入，方便切环境
 
@@ -274,6 +276,7 @@ ssh ssh-tokyo 'docker inspect ghcr.io/ranshen1209/gpt_image_playground:latest --
 | `OAUTH_BASE` | `__VITE_SAKRYLLE_OAUTH_BASE_PLACEHOLDER__` | `https://sub.sakrylle.com` |
 | `OAUTH_CLIENT_ID` | `__VITE_SAKRYLLE_OAUTH_CLIENT_ID_PLACEHOLDER__` | `sakrylle-image-playground` |
 | `OIDC_ENABLED` | `__VITE_SAKRYLLE_OIDC_ENABLED_PLACEHOLDER__` | `false` |
+| `OIDC_ISSUER` | `__VITE_SAKRYLLE_OIDC_ISSUER_PLACEHOLDER__` | `https://oidc1.sakrylle.com` |
 | `API_PROXY_URL` | nginx `${API_PROXY_URL}`（仅启用代理时） | 空 |
 | `HOST` / `PORT` | nginx listen | `0.0.0.0:80` |
 
@@ -297,7 +300,7 @@ DNS、nginx、compose 三件套照 Obsidian 部署文档走。摘要：
 2. `/opt/stack/nginx/conf.d/sakrylle-image.conf`：80 → 301 https；8443 → SSL（复用 `sakrylle.com` wildcard cert）→ `proxy_pass http://gpt-image-playground:80`，`client_max_body_size 600m`（蒙版编辑器多图上传可能很大），`proxy_read_timeout 600s`（流式图像生成），`proxy_buffering off`
 3. `/opt/stack/docker-compose.yml` 加服务 `gpt-image-playground`，挂 `stack_default` 网络，`DEFAULT_API_URL=https://api.sakrylle.com/v1`，`ENABLE_API_PROXY=false`，`depends_on: nginx`
 4. `docker compose up -d gpt-image-playground` + `docker exec nginx nginx -s reload`
-5. 浏览器开 `https://image.sakrylle.com/`，点登录 → 确认跳 `sub.sakrylle.com/oauth/authorize?...client_id=sakrylle-image-playground...` 不报 `redirect_uri_mismatch`
+5. 浏览器开 `https://image.sakrylle.com/`，点登录 → 确认跳 `oidc1.sakrylle.com/oauth/authorize?...client_id=sakrylle-image-playground...`（OIDC 开启时经 discovery 指向 oidc1）不报 `redirect_uri_mismatch`
 
 ## 同步上游
 
@@ -321,7 +324,7 @@ git fetch upstream && git checkout theme/sakrylle && git rebase upstream/main
 - `package.json` `version` 字段
 - `public/sw.js` `CACHE_NAME` 版本
 - `deploy/Dockerfile`（新增 `__VITE_SAKRYLLE_*` + `__VITE_DOCKER_*` 占位符）
-- `deploy/inject-api-url.sh`（新增 OAUTH_BASE / OAUTH_CLIENT_ID / OIDC_ENABLED 注入逻辑）
+- `deploy/inject-api-url.sh`（新增 OAUTH_BASE / OAUTH_CLIENT_ID / OIDC_ENABLED / OIDC_ISSUER 注入逻辑）
 - `src/vite-env.d.ts`（`ImportMetaEnv` 新增 Sakrylle 变量声明）
 - `src/store.ts`（import groupSelection / oauthFallback / sakrylle 模块）
 

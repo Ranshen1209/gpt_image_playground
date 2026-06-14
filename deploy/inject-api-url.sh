@@ -25,13 +25,19 @@ find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_DO
 find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_DOCKER_LEGACY_API_URL_USED_PLACEHOLDER__|$DOCKER_LEGACY_API_URL_USED|g" {} +
 
 # Sakrylle OAuth / OIDC 配置注入
-OAUTH_BASE=${OAUTH_BASE:-https://sub.sakrylle.com}
+# OAUTH_BASE 仅作 OIDC 关闭时的非 OIDC 回退路径默认值；旧 host(sub) 已被墙，默认迁 oidc1。
+# OIDC 开启时（生产默认）所有端点经 discovery 解析自 OIDC_ISSUER，不走 OAUTH_BASE。
+OAUTH_BASE=${OAUTH_BASE:-https://oidc1.sakrylle.com}
 OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-sakrylle-image-playground}
 OIDC_ENABLED=${OIDC_ENABLED:-false}
+# OIDC issuer 与 OAUTH_BASE 解耦：旧 OAuth host(sub) 已被墙，OIDC 迁到独立 host。
+# 做成运行时变量，将来 issuer host 再被墙时改环境变量重启即可，无需重新构建。
+OIDC_ISSUER=${OIDC_ISSUER:-https://oidc1.sakrylle.com}
 
 find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OAUTH_BASE_PLACEHOLDER__|$OAUTH_BASE|g" {} +
 find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OAUTH_CLIENT_ID_PLACEHOLDER__|$OAUTH_CLIENT_ID|g" {} +
 find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OIDC_ENABLED_PLACEHOLDER__|$OIDC_ENABLED|g" {} +
+find /usr/share/nginx/html/assets -type f -name "*.js" -exec sed -i "s|__VITE_SAKRYLLE_OIDC_ISSUER_PLACEHOLDER__|$OIDC_ISSUER|g" {} +
 
 # 检查是否启用了 API 代理
 if [ "$ENABLE_API_PROXY" != "true" ]; then

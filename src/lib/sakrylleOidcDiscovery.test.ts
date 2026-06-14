@@ -7,12 +7,13 @@ vi.mock('./runtimeEnv', () => ({
 import { _resetDiscoveryCache, getDiscoveryEndpoints } from './sakrylleOidcDiscovery'
 
 const MOCK_DISCOVERY = {
-  issuer: 'https://sub.sakrylle.com',
-  authorization_endpoint: 'https://sub.sakrylle.com/oauth/authorize',
-  token_endpoint: 'https://sub.sakrylle.com/oauth/token',
-  userinfo_endpoint: 'https://sub.sakrylle.com/userinfo',
-  end_session_endpoint: 'https://sub.sakrylle.com/oauth/logout',
-  jwks_uri: 'https://sub.sakrylle.com/.well-known/jwks.json',
+  issuer: 'https://oidc1.sakrylle.com',
+  authorization_endpoint: 'https://oidc1.sakrylle.com/oauth/authorize',
+  token_endpoint: 'https://oidc1.sakrylle.com/oauth/token',
+  userinfo_endpoint: 'https://oidc1.sakrylle.com/userinfo',
+  end_session_endpoint: 'https://oidc1.sakrylle.com/oauth/logout',
+  revocation_endpoint: 'https://oidc1.sakrylle.com/oauth/revoke',
+  jwks_uri: 'https://oidc1.sakrylle.com/.well-known/jwks.json',
 }
 
 describe('getDiscoveryEndpoints', () => {
@@ -33,12 +34,13 @@ describe('getDiscoveryEndpoints', () => {
 
     const endpoints = await getDiscoveryEndpoints()
 
-    expect(endpoints.authorizationEndpoint).toBe('https://sub.sakrylle.com/oauth/authorize')
-    expect(endpoints.tokenEndpoint).toBe('https://sub.sakrylle.com/oauth/token')
-    expect(endpoints.userinfoEndpoint).toBe('https://sub.sakrylle.com/userinfo')
-    expect(endpoints.endSessionEndpoint).toBe('https://sub.sakrylle.com/oauth/logout')
-    expect(endpoints.jwksUri).toBe('https://sub.sakrylle.com/.well-known/jwks.json')
-    expect(endpoints.issuer).toBe('https://sub.sakrylle.com')
+    expect(endpoints.authorizationEndpoint).toBe('https://oidc1.sakrylle.com/oauth/authorize')
+    expect(endpoints.tokenEndpoint).toBe('https://oidc1.sakrylle.com/oauth/token')
+    expect(endpoints.userinfoEndpoint).toBe('https://oidc1.sakrylle.com/userinfo')
+    expect(endpoints.endSessionEndpoint).toBe('https://oidc1.sakrylle.com/oauth/logout')
+    expect(endpoints.revocationEndpoint).toBe('https://oidc1.sakrylle.com/oauth/revoke')
+    expect(endpoints.jwksUri).toBe('https://oidc1.sakrylle.com/.well-known/jwks.json')
+    expect(endpoints.issuer).toBe('https://oidc1.sakrylle.com')
   })
 
   it('caches the result and does not re-fetch within TTL', async () => {
@@ -57,9 +59,9 @@ describe('getDiscoveryEndpoints', () => {
 
     const endpoints = await getDiscoveryEndpoints()
 
-    expect(endpoints.authorizationEndpoint).toBe('https://sub.sakrylle.com/oauth/authorize')
-    expect(endpoints.tokenEndpoint).toBe('https://sub.sakrylle.com/oauth/token')
-    expect(endpoints.issuer).toBe('https://sub.sakrylle.com')
+    expect(endpoints.authorizationEndpoint).toBe('https://oidc1.sakrylle.com/oauth/authorize')
+    expect(endpoints.tokenEndpoint).toBe('https://oidc1.sakrylle.com/oauth/token')
+    expect(endpoints.issuer).toBe('https://oidc1.sakrylle.com')
   })
 
   it('falls back to hardcoded endpoints on non-OK response', async () => {
@@ -69,7 +71,7 @@ describe('getDiscoveryEndpoints', () => {
 
     const endpoints = await getDiscoveryEndpoints()
 
-    expect(endpoints.authorizationEndpoint).toBe('https://sub.sakrylle.com/oauth/authorize')
+    expect(endpoints.authorizationEndpoint).toBe('https://oidc1.sakrylle.com/oauth/authorize')
   })
 
   it('falls back when issuer does not match', async () => {
@@ -81,7 +83,7 @@ describe('getDiscoveryEndpoints', () => {
     const endpoints = await getDiscoveryEndpoints()
 
     // Should fall back to hardcoded
-    expect(endpoints.issuer).toBe('https://sub.sakrylle.com')
+    expect(endpoints.issuer).toBe('https://oidc1.sakrylle.com')
   })
 
   it('falls back when authorization_endpoint is missing', async () => {
@@ -92,7 +94,7 @@ describe('getDiscoveryEndpoints', () => {
 
     const endpoints = await getDiscoveryEndpoints()
 
-    expect(endpoints.authorizationEndpoint).toBe('https://sub.sakrylle.com/oauth/authorize')
+    expect(endpoints.authorizationEndpoint).toBe('https://oidc1.sakrylle.com/oauth/authorize')
   })
 
   it('falls back when endpoint origin does not match issuer', async () => {
@@ -106,7 +108,7 @@ describe('getDiscoveryEndpoints', () => {
 
     const endpoints = await getDiscoveryEndpoints()
 
-    expect(endpoints.tokenEndpoint).toBe('https://sub.sakrylle.com/oauth/token')
+    expect(endpoints.tokenEndpoint).toBe('https://oidc1.sakrylle.com/oauth/token')
   })
 
   it('falls back on timeout', async () => {
@@ -116,6 +118,6 @@ describe('getDiscoveryEndpoints', () => {
 
     const endpoints = await getDiscoveryEndpoints()
 
-    expect(endpoints.authorizationEndpoint).toBe('https://sub.sakrylle.com/oauth/authorize')
+    expect(endpoints.authorizationEndpoint).toBe('https://oidc1.sakrylle.com/oauth/authorize')
   }, 20_000)
 })

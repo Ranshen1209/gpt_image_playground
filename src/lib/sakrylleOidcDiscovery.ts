@@ -4,8 +4,15 @@
 
 import { readRuntimeEnv } from './runtimeEnv'
 
-const OAUTH_BASE = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OAUTH_BASE) || 'https://sub.sakrylle.com'
-const ISSUER = 'https://sub.sakrylle.com'
+// OIDC issuer — the canonical IdP identity. The Sakrylle gateway derives every
+// endpoint (authorize/token/userinfo/jwks/end_session/revoke) from this single
+// issuer value, so issuer + all endpoints are same-origin by construction.
+// Decoupled from OAUTH_BASE (sub.sakrylle.com): the legacy OAuth host is
+// GFW-blocked, so OIDC moved to its own host. Runtime-injectable
+// (VITE_SAKRYLLE_OIDC_ISSUER) so the issuer host can be rotated without a
+// rebuild if it ever gets blocked too — see deploy/inject-api-url.sh.
+const OIDC_ISSUER = readRuntimeEnv(import.meta.env.VITE_SAKRYLLE_OIDC_ISSUER) || 'https://oidc1.sakrylle.com'
+const ISSUER = OIDC_ISSUER
 
 const DISCOVERY_TTL_MS = 60 * 60 * 1000 // 1 hour
 const FETCH_TIMEOUT_MS = 10_000
@@ -15,6 +22,7 @@ export interface DiscoveryEndpoints {
   tokenEndpoint: string
   userinfoEndpoint: string
   endSessionEndpoint: string
+  revocationEndpoint: string
   jwksUri: string
   issuer: string
 }
@@ -28,11 +36,12 @@ let cache: CachedEntry | null = null
 
 function hardcodedEndpoints(): DiscoveryEndpoints {
   return {
-    authorizationEndpoint: `${OAUTH_BASE}/oauth/authorize`,
-    tokenEndpoint: `${OAUTH_BASE}/oauth/token`,
-    userinfoEndpoint: `${OAUTH_BASE}/v1/me`,
-    endSessionEndpoint: `${OAUTH_BASE}/oauth/logout`,
-    jwksUri: `${OAUTH_BASE}/.well-known/jwks.json`,
+    authorizationEndpoint: `${OIDC_ISSUER}/oauth/authorize`,
+    tokenEndpoint: `${OIDC_ISSUER}/oauth/token`,
+    userinfoEndpoint: `${OIDC_ISSUER}/v1/me`,
+    endSessionEndpoint: `${OIDC_ISSUER}/oauth/logout`,
+    revocationEndpoint: `${OIDC_ISSUER}/oauth/revoke`,
+    jwksUri: `${OIDC_ISSUER}/.well-known/jwks.json`,
     issuer: ISSUER,
   }
 }
@@ -43,6 +52,7 @@ interface RawDiscovery {
   token_endpoint?: string
   userinfo_endpoint?: string
   end_session_endpoint?: string
+  revocation_endpoint?: string
   jwks_uri?: string
 }
 
@@ -55,7 +65,7 @@ function parseDiscovery(raw: RawDiscovery, origin: string): DiscoveryEndpoints |
   if (!authz || !token) return null
 
   // All endpoints must be same-origin as issuer for security
-  const endpoints = [authz, token, raw.userinfo_endpoint, raw.end_session_endpoint, raw.jwks_uri]
+  const endpoints = [authz, token, raw.userinfo_endpoint, raw.end_session_endpoint, raw.revocation_endpoint, raw.jwks_uri]
   for (const ep of endpoints) {
     if (ep) {
       try {
@@ -69,16 +79,17 @@ function parseDiscovery(raw: RawDiscovery, origin: string): DiscoveryEndpoints |
   return {
     authorizationEndpoint: authz,
     tokenEndpoint: token,
-    userinfoEndpoint: raw.userinfo_endpoint || `${OAUTH_BASE}/v1/me`,
-    endSessionEndpoint: raw.end_session_endpoint || `${OAUTH_BASE}/oauth/logout`,
-    jwksUri: raw.jwks_uri || `${OAUTH_BASE}/.well-known/jwks.json`,
+    userinfoEndpoint: raw.userinfo_endpoint || `${OIDC_ISSUER}/v1/me`,
+    endSessionEndpoint: raw.end_session_endpoint || `${OIDC_ISSUER}/oauth/logout`,
+    revocationEndpoint: raw.revocation_endpoint || `${OIDC_ISSUER}/oauth/revoke`,
+    jwksUri: raw.jwks_uri || `${OIDC_ISSUER}/.well-known/jwks.json`,
     issuer: raw.issuer,
   }
 }
 
 async function fetchDiscovery(): Promise<DiscoveryEndpoints | null> {
-  const url = `${OAUTH_BASE}/.well-known/openid-configuration`
-  const expectedOrigin = new URL(OAUTH_BASE).origin
+  const url = `${OIDC_ISSUER}/.well-known/openid-configuration`
+  const expectedOrigin = new URL(OIDC_ISSUER).origin
 
   try {
     const controller = new AbortController()
@@ -102,7 +113,7 @@ async function fetchDiscovery(): Promise<DiscoveryEndpoints | null> {
 /**
  * Get OIDC discovery endpoints. Returns cached result if fresh (< TTL).
  * On failure (network, timeout, invalid response, issuer mismatch), falls back
- * to hardcoded endpoints derived from OAUTH_BASE.
+ * to hardcoded endpoints derived from OIDC_ISSUER.
  */
 export async function getDiscoveryEndpoints(): Promise<DiscoveryEndpoints> {
   // Return cache if fresh

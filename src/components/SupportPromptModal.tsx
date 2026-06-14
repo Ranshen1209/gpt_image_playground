@@ -67,7 +67,7 @@ export default function SupportPromptModal() {
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <a
-            href="https://sub.sakrylle.com/purchase"
+            href="https://ai1.sakrylle.com/purchase"
             target="_blank"
             rel="noopener noreferrer"
             onClick={dismissSupportPrompt}

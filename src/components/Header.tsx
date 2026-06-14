@@ -13,7 +13,7 @@ import { beginLogin as sakrylleBeginLogin, getStoredToken } from '../lib/sakryll
 import { readStoredTheme, switchTheme, type Theme } from '../lib/theme'
 import type { Language } from '../lib/language'
 
-const SAKRYLLE_PURCHASE_URL = 'https://sub.sakrylle.com/purchase'
+const SAKRYLLE_PURCHASE_URL = 'https://ai1.sakrylle.com/purchase'
 
 export default function Header() {
   const { t, i18n } = useTranslation()
