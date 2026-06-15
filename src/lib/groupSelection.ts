@@ -4,6 +4,12 @@ import { getStoredToken } from './sakrylleAuth'
 const STORAGE_KEY = 'sakrylle-image-playground.selected-groups'
 const GROUP_NAMES_STORAGE_KEY = 'sakrylle-image-playground.group-names'
 
+// Sakrylle fork: restrict BOTH group selectors to GPT-series groups only —
+// Images shows GPT image-gen groups (GPT-Image*), Responses shows GPT chat
+// groups (GPT-Pro*). Set to false to restore the general multi-provider list
+// (Claude / Deepseek / Grok / Agnes / etc.).
+const GPT_ONLY_GROUPS: boolean = true
+
 export interface SelectedGroups {
   responses?: number
   images?: number
@@ -188,6 +194,18 @@ export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: Sak
   if (!groups.length) return []
 
   if (apiMode === 'images') {
+    // Sakrylle fork: Images selector shows ONLY GPT image-gen groups
+    // (GPT-Image, GPT-Image-2-4K, GPT-Image-2-Async). GPT chat groups
+    // (GPT-Pro / GPT-Pro-Special) and other providers (Grok / Agnes) carry
+    // allow_image_generation:true → an images:create capability, so capability
+    // alone can't tell them apart from real image groups. The image NAME is the
+    // only reliable signal, so require both a GPT name and an image name.
+    if (GPT_ONLY_GROUPS) {
+      return groups.filter((group) =>
+        groupNameLooksImage(group) && normalizedGroupName(group).includes('gpt'),
+      )
+    }
+
     const capabilityGroups = groups.filter((group) => groupSupportsModeByCapability(group, apiMode))
     if (capabilityGroups.length) return capabilityGroups
 
@@ -198,10 +216,20 @@ export function getGroupsForApiMode(apiMode: 'images' | 'responses', groups: Sak
     return namedImageGroups.length ? namedImageGroups : []
   }
 
-  // Responses/Agent mode: show every group that is NOT an images group —
-  // GPT-Pro / GPT-Plus, Claude, and any other non-image group, not just the
-  // GPT-named ones. Name-only generic fallback groups ("Group 11") are dropped
-  // because we can't tell what they are; capability-bearing groups are kept.
+  // Responses/Agent mode: Sakrylle fork shows ONLY GPT chat groups
+  // (GPT-Pro, GPT-Pro-Special). Image-named GPT groups (GPT-Image*) belong to
+  // the Images selector and are excluded. Inclusion is by GPT name — NOT by
+  // capability/isImageGroup — because the gateway flags GPT chat groups with
+  // allow_image_generation:true (→ images:create capability via normalizeGroup),
+  // which would otherwise misclassify them as image-only and hide them.
+  // Flip GPT_ONLY_GROUPS to restore the general multi-provider list.
+  if (GPT_ONLY_GROUPS) {
+    return groups.filter((group) => {
+      if (groupNameLooksImage(group)) return false
+      return normalizedGroupName(group).includes('gpt')
+    })
+  }
+
   return groups.filter((group) => {
     if (isImageGroup(group)) return false
     const capabilities = group.capabilities ?? []

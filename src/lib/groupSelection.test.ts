@@ -146,7 +146,7 @@ describe('getGroupsForApiMode', () => {
     expect(getGroupsForApiMode('responses', groups)).toEqual([{ id: 9, name: 'GPT-Plus' }])
   })
 
-  it('shows non-GPT groups (e.g. Claude) alongside GPT ones for Responses', () => {
+  it('shows only GPT chat groups for Responses, hiding non-GPT groups', () => {
     const groups = [
       { id: 5, name: 'GPT-Image' },
       { id: 9, name: 'GPT-Pro' },
@@ -155,18 +155,44 @@ describe('getGroupsForApiMode', () => {
 
     expect(getGroupsForApiMode('responses', groups)).toEqual([
       { id: 9, name: 'GPT-Pro' },
-      { id: 12, name: 'Claude-Max' },
     ])
   })
 
-  it('keeps capability-bearing Responses groups regardless of name', () => {
+  it('hides non-GPT groups from Responses even when they declare responses capability', () => {
     const groups = [
-      { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+      { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
       { id: 12, name: 'Claude-Max', capabilities: ['messages:create', 'responses:create'] },
     ]
 
     expect(getGroupsForApiMode('responses', groups)).toEqual([
-      { id: 12, name: 'Claude-Max', capabilities: ['messages:create', 'responses:create'] },
+      { id: 9, name: 'GPT-Pro', capabilities: ['responses:create'] },
+    ])
+  })
+
+  it('keeps a GPT chat group in Responses even when gateway flags it image-capable', () => {
+    // Regression: /v1/me marks GPT-Pro with allow_image_generation:true, which
+    // normalizeGroup turns into an images:create capability. That must NOT
+    // reclassify the GPT chat group as image-only and hide it from Responses.
+    const groups = [
+      { id: 14, name: 'GPT-Pro', capabilities: ['images:create'] },
+      { id: 3, name: 'GPT-Pro-Special', capabilities: ['images:create'] },
+    ]
+
+    expect(getGroupsForApiMode('responses', groups)).toEqual([
+      { id: 14, name: 'GPT-Pro', capabilities: ['images:create'] },
+      { id: 3, name: 'GPT-Pro-Special', capabilities: ['images:create'] },
+    ])
+  })
+
+  it('excludes image-named GPT groups from Responses despite the GPT prefix', () => {
+    const groups = [
+      { id: 11, name: 'GPT-Image-2-4K' },
+      { id: 21, name: 'GPT-Image-2-Async' },
+      { id: 14, name: 'GPT-Pro' },
+    ]
+
+    expect(getGroupsForApiMode('responses', groups)).toEqual([
+      { id: 14, name: 'GPT-Pro' },
     ])
   })
 
@@ -210,16 +236,37 @@ describe('getGroupsForApiMode', () => {
     expect(resolveSelectedGroupId('images', groups)).toBeUndefined()
   })
 
-  it('uses capability over image-looking names for Images candidates', () => {
+  it('shows only GPT image-named groups for Images, ignoring non-GPT image-capable groups', () => {
     const groups = [
       { id: 5, name: 'GPT-Image', capabilities: ['responses:create'] },
-      { id: 11, name: 'Group 11', capabilities: ['images:create'] },
+      { id: 11, name: 'Flux-Pro', capabilities: ['images:create'] },
     ]
 
     expect(getGroupsForApiMode('images', groups)).toEqual([
-      { id: 11, name: 'Group 11', capabilities: ['images:create'] },
+      { id: 5, name: 'GPT-Image', capabilities: ['responses:create'] },
     ])
-    expect(resolveSelectedGroupId('images', groups)).toBe(11)
+    expect(resolveSelectedGroupId('images', groups)).toBe(5)
+  })
+
+  it('excludes GPT chat groups from Images even when gateway flags them image-capable', () => {
+    // GPT-Pro / Grok have allow_image_generation:true (→ images:create cap) but
+    // are chat groups, not image-gen groups. They must stay out of the Images
+    // selector — only image-NAMED GPT groups belong there.
+    const groups = [
+      { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+      { id: 11, name: 'GPT-Image-2-4K', capabilities: ['images:create'] },
+      { id: 21, name: 'GPT-Image-2-Async', capabilities: ['images:create'] },
+      { id: 14, name: 'GPT-Pro', capabilities: ['images:create'] },
+      { id: 3, name: 'GPT-Pro-Special', capabilities: ['images:create'] },
+      { id: 22, name: 'Grok-API', capabilities: ['images:create'] },
+      { id: 23, name: 'Agnes-API', capabilities: ['images:create'] },
+    ]
+
+    expect(getGroupsForApiMode('images', groups)).toEqual([
+      { id: 5, name: 'GPT-Image', capabilities: ['images:create'] },
+      { id: 11, name: 'GPT-Image-2-4K', capabilities: ['images:create'] },
+      { id: 21, name: 'GPT-Image-2-Async', capabilities: ['images:create'] },
+    ])
   })
 })
 
