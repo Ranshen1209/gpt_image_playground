@@ -29,7 +29,7 @@ import { copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboar
 import { beginLogin as sakrylleBeginLogin, getStoredToken as sakrylleGetStoredToken, logoutAndRevoke as sakrylleLogout } from '../lib/sakrylleAuth'
 import { canUseOAuthForProfile } from '../lib/oauthFallback'
 import { getSelectedGroups, setSelectedGroup, fetchResponsesApiGroups, getSelectedGroupId, getGroupAccessToken, resolveSelectedGroupId, ensureSelectedGroupId, getGroupsForApiMode, getAvailableGroups } from '../lib/groupSelection'
-import { fetchModelsWithToken, type SakrylleModel } from '../lib/sakrylleAccount'
+import { fetchModelsWithToken, isGptTextModelId, type SakrylleModel } from '../lib/sakrylleAccount'
 import { requestBrowserNotificationPermission, type BrowserNotificationPermissionResult } from '../lib/browserNotification'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type CustomProviderDefinition, type ZipDownloadRoute } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
@@ -370,9 +370,13 @@ function ModelSelector({ value, onChange, filterImage, placeholder, mode }: {
       const result = await fetchModelsWithToken(accessToken)
       if (cancelled) return
       const seenModelIds = new Set<string>()
+      // Images: keep gateway image models (allow_image_generation flag is correct
+      // for the GPT-Image group). Responses: keep GPT text models by NAME —
+      // image-capable groups flag every chat model allow_image_generation:true,
+      // so the flag can't be used here (see isGptTextModelId).
       const filtered = (filterImage
         ? result.filter(m => m.allowImageGeneration)
-        : result.filter(m => !m.allowImageGeneration))
+        : result.filter(m => isGptTextModelId(m.id)))
         .filter((model) => {
           if (seenModelIds.has(model.id)) return false
           seenModelIds.add(model.id)

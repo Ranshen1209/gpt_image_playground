@@ -23,7 +23,7 @@ vi.mock('./sakrylleAuth', () => {
   }
 })
 
-import { fetchBalance, fetchMe, formatBalance, formatCny } from './sakrylleAccount'
+import { fetchBalance, fetchMe, formatBalance, formatCny, isGptTextModelId, isImageModelId } from './sakrylleAccount'
 import * as sakrylleAuth from './sakrylleAuth'
 
 const authMock = sakrylleAuth as typeof sakrylleAuth & {
@@ -43,6 +43,39 @@ function seedToken(accessToken = 'sk_oauth_test_access', scope = 'image_generati
 function seedV2Token(accessToken = 'sk_oauth_test_access'): void {
   seedToken(accessToken, 'profile:read account:balance:read models:read images:create responses:create offline_access')
 }
+
+describe('isImageModelId', () => {
+  it('matches image-gen model ids regardless of case', () => {
+    expect(isImageModelId('gpt-image-2')).toBe(true)
+    expect(isImageModelId('gpt-image-2-async')).toBe(true)
+    expect(isImageModelId('GPT-Image-2-4K')).toBe(true)
+  })
+
+  it('rejects text model ids', () => {
+    expect(isImageModelId('gpt-5.5')).toBe(false)
+    expect(isImageModelId('gpt-5.4-openai-compact')).toBe(false)
+    expect(isImageModelId('codex-auto-review')).toBe(false)
+  })
+})
+
+describe('isGptTextModelId', () => {
+  it('accepts gpt-* text models that support the image_generation tool', () => {
+    // Real Sakrylle GPT-Pro models — all report allow_image_generation:true, so
+    // the discriminator must be the name, not the flag.
+    expect(isGptTextModelId('gpt-5.5')).toBe(true)
+    expect(isGptTextModelId('gpt-5.4')).toBe(true)
+    expect(isGptTextModelId('gpt-5.4-mini')).toBe(true)
+    expect(isGptTextModelId('gpt-5.5-openai-compact')).toBe(true)
+    expect(isGptTextModelId('GPT-5.5')).toBe(true)
+  })
+
+  it('rejects image models and non-GPT models', () => {
+    expect(isGptTextModelId('gpt-image-2')).toBe(false)
+    expect(isGptTextModelId('gpt-image-2-async')).toBe(false)
+    expect(isGptTextModelId('codex-auto-review')).toBe(false)
+    expect(isGptTextModelId('claude-sonnet-4-6')).toBe(false)
+  })
+})
 
 describe('formatBalance', () => {
   it('renders CNY by default with the ￥ symbol', () => {

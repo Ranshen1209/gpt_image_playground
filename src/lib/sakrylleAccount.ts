@@ -309,7 +309,24 @@ export async function fetchModelsWithToken(accessToken: string): Promise<Sakryll
   }
 }
 
-// Render a balance with the symbol Sakrylle returned for this user.
+// A model is an image-generation model when its id names it so (gpt-image-2,
+// gpt-image-2-async). The gateway's per-model `allow_image_generation` flag is
+// NOT a reliable discriminator on Sakrylle: image-capable groups (GPT-Pro) flag
+// every model true, including chat models that merely support the
+// image_generation tool. The model id is the only dependable signal.
+export function isImageModelId(id: string): boolean {
+  return /image/i.test(id)
+}
+
+// Responses/Agent mode needs GPT text models that support the image_generation
+// tool (gpt-5.x, gpt-5.x-openai-compact). Restrict to gpt-* ids that are not
+// image models — excludes gpt-image-* (image models) and non-GPT models like
+// codex-auto-review. Filtering by name, not allow_image_generation (see above).
+export function isGptTextModelId(id: string): boolean {
+  return /^gpt/i.test(id) && !isImageModelId(id)
+}
+
+
 // docs §3.1 — currency_display drives symbol; the numeric value is NOT FX-converted.
 export function formatBalance(amount: number, currency: 'CNY' | 'USD' = 'CNY'): string {
   const symbol = currency === 'USD' ? '$' : '￥'
