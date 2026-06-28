@@ -62,7 +62,7 @@ describe('oauthFallback', () => {
   describe('canUseOAuthForProfile', () => {
     it('returns false when provider is not openai', () => {
       const profile = createProfile({ provider: 'openai' as any })
-      profile.provider = 'fal' as any
+      profile.provider = 'custom-provider' as any
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,

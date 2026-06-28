@@ -1,8 +1,8 @@
 // OAuth Bearer fallback for image API requests.
 //
 // 当用户登录了 Sakrylle OAuth 但没配 API Key 时，自动用 access_token 调
-// /v1/images/* 和 /v1/responses。仅适用于 Sakrylle 官方 baseUrl —— 其它服务商
-// (fal.ai、自定义 HTTP) 仍然要求显式 apiKey。
+// /v1/images/* 和 /v1/responses。仅适用于 Sakrylle 官方 baseUrl；自定义 HTTP
+// 服务商仍然要求显式 apiKey。
 
 import type { ApiProfile } from '../types'
 import { ensureSelectedGroupId, getGroupAccessToken } from './groupSelection'

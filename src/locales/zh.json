@@ -675,8 +675,6 @@
   },
   "settingsApiUrlExtras": {
     "proxyEnabledNote": "已开启代理，实际请求目标由部署端决定，此处设置被忽略。",
-    "falDefaultPrefix": "默认使用 ",
-    "falDefaultSuffix": "；填写自定义地址时将作为 fal.ai 代理 URL。",
     "queryOverridePrefix": "支持通过查询参数覆盖："
   },
   "docker": {

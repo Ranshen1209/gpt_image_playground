@@ -34,12 +34,10 @@ const DEFAULT_BASE_URL = isImportableConfigUrl(RAW_DEFAULT_API_URL)
   : RAW_DEFAULT_API_URL || (DOCKER_DEPLOYMENT && DEFAULT_OPENAI_API_PROXY ? '' : SAKRYLLE_DEFAULT_BASE_URL)
 export const DEFAULT_IMAGES_MODEL = 'gpt-image-2'
 export const DEFAULT_RESPONSES_MODEL = 'gpt-5.5'
-export const DEFAULT_FAL_BASE_URL = 'https://fal.run'
-export const DEFAULT_FAL_MODEL = 'openai/gpt-image-2'
 export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
 export const DEFAULT_API_TIMEOUT = 600
 
-const BUILT_IN_PROVIDER_IDS = new Set<ApiProvider>(['openai', 'fal'])
+const BUILT_IN_PROVIDER_IDS = new Set<ApiProvider>(['openai'])
 const DEFAULT_CUSTOM_PROVIDER_PATHS = {
   generationPath: 'images/generations',
   editPath: 'images/edits',
@@ -104,7 +102,7 @@ function normalizeZipDownloadRoutes(value: unknown) {
 function normalizeProviderOrder(value: unknown, customProviders: CustomProviderDefinition[]): string[] | undefined {
   if (!Array.isArray(value)) return undefined
 
-  const providerIds = ['openai', 'fal', ...customProviders.map((provider) => provider.id)]
+  const providerIds = ['openai', ...customProviders.map((provider) => provider.id)]
   const knownIds = new Set(providerIds)
   const ordered = value
     .map(String)
@@ -351,26 +349,8 @@ export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}):
   }
 }
 
-export function createDefaultFalProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
-  return {
-    id: `fal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    name: '新配置',
-    provider: 'fal',
-    baseUrl: DEFAULT_FAL_BASE_URL,
-    apiKey: '',
-    model: DEFAULT_FAL_MODEL,
-    timeout: DEFAULT_API_TIMEOUT,
-    apiMode: 'images',
-    codexCli: false,
-    apiProxy: false,
-    streamImages: false,
-    streamChatCompletionsImage: false,
-    streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
-    ...overrides,
-  }
-}
-
 export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvider, customProvider?: CustomProviderDefinition): ApiProfile {
+  const nextProvider = customProvider ? customProvider.id : 'openai'
   const providerDrafts = {
     ...profile.providerDrafts,
     [profile.provider]: {
@@ -384,31 +364,15 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
       streamPartialImages: profile.streamPartialImages,
     },
   }
-  const savedDraft = providerDrafts[provider]
-
-  if (provider === 'fal') {
-    return {
-      ...profile,
-      provider,
-      baseUrl: savedDraft?.baseUrl ?? DEFAULT_FAL_BASE_URL,
-      model: savedDraft?.model ?? DEFAULT_FAL_MODEL,
-      apiMode: 'images',
-      codexCli: false,
-      apiProxy: false,
-      responseFormatB64Json: savedDraft?.responseFormatB64Json,
-      streamImages: false,
-      streamPartialImages: savedDraft?.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES,
-      providerDrafts,
-    }
-  }
+  const targetProvider = customProvider ? provider : 'openai'
+  const savedDraft = providerDrafts[targetProvider]
 
   if (customProvider) {
-    const shouldUseOpenAIDefaults = profile.provider === 'fal'
     return {
       ...profile,
       provider: customProvider.id,
-      baseUrl: savedDraft?.baseUrl ?? (shouldUseOpenAIDefaults ? DEFAULT_BASE_URL : profile.baseUrl || DEFAULT_BASE_URL),
-      model: savedDraft?.model ?? (shouldUseOpenAIDefaults ? DEFAULT_IMAGES_MODEL : profile.model || DEFAULT_IMAGES_MODEL),
+      baseUrl: savedDraft?.baseUrl ?? (profile.baseUrl || DEFAULT_BASE_URL),
+      model: savedDraft?.model ?? (profile.model || DEFAULT_IMAGES_MODEL),
       apiMode: 'images',
       codexCli: false,
       apiProxy: false,
@@ -429,7 +393,7 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
 
   return {
     ...profile,
-    provider,
+    provider: nextProvider,
     baseUrl: savedDraft?.baseUrl ?? DEFAULT_BASE_URL,
     model: savedDraft?.model ?? DEFAULT_IMAGES_MODEL,
     apiMode: nextApiMode,
@@ -444,17 +408,15 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
 
 function normalizeProviderDraft(input: unknown, provider: ApiProvider, customProviderIds: Set<string>): ApiProfileProviderDraft {
   if (!isRecord(input)) return undefined
-  const fallback = provider === 'fal' ? createDefaultFalProfile() : createDefaultOpenAIProfile()
+  const fallback = createDefaultOpenAIProfile()
   const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : undefined
   const model = typeof input.model === 'string' && input.model.trim() ? input.model : undefined
   const apiMode = input.apiMode === 'responses' ? 'responses' : input.apiMode === 'images' ? 'images' : undefined
-  const knownProvider = provider === 'fal' || provider === 'openai' || customProviderIds.has(provider)
+  const knownProvider = provider === 'openai' || customProviderIds.has(provider)
   if (!knownProvider) return undefined
 
   return {
-    baseUrl: provider === 'fal'
-      ? baseUrl?.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
-      : baseUrl,
+    baseUrl,
     model,
     apiMode,
     codexCli: typeof input.codexCli === 'boolean' ? input.codexCli : fallback.codexCli,
@@ -477,12 +439,11 @@ function normalizeProviderDrafts(input: unknown, customProviderIds: Set<string>)
 export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfile>, customProviderIds = new Set<string>()): ApiProfile {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   const rawProvider = typeof record.provider === 'string' ? record.provider : ''
-  const provider: ApiProvider = rawProvider === 'fal' || customProviderIds.has(rawProvider) ? rawProvider : 'openai'
+  const isRemovedFalProvider = rawProvider === 'fal'
+  const provider: ApiProvider = customProviderIds.has(rawProvider) ? rawProvider : 'openai'
   const apiMode: ApiMode = provider === 'openai' && record.apiMode === 'responses' ? 'responses' : 'images'
-  const defaults = provider === 'fal'
-    ? createDefaultFalProfile(fallback)
-    : createDefaultOpenAIProfile({ ...fallback, apiMode })
-  const rawBaseUrl = typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl
+  const defaults = createDefaultOpenAIProfile({ ...fallback, apiMode })
+  const rawBaseUrl = !isRemovedFalProvider && typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl
   const streamImages = provider === 'openai'
     ? typeof record.streamImages === 'boolean' ? record.streamImages : defaults.streamImages
     : false
@@ -495,8 +456,8 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
       : defaults.name,
     provider,
     baseUrl: rawBaseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
+    apiKey: !isRemovedFalProvider && typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
+    model: !isRemovedFalProvider && typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
     responsesModel: typeof record.responsesModel === 'string' && record.responsesModel.trim()
       ? record.responsesModel.trim()
       : defaults.responsesModel,
@@ -612,7 +573,6 @@ export function getCustomProviderDefinition(settings: Partial<AppSettings> | unk
 }
 
 export function getApiProviderLabel(settings: Partial<AppSettings> | unknown, provider: ApiProvider): string {
-  if (provider === 'fal') return 'fal.ai'
   if (provider === 'openai') return 'OpenAI'
   return getCustomProviderDefinition(settings, provider)?.name ?? provider
 }
@@ -719,7 +679,7 @@ export interface ValidateApiProfileOptions {
 
 export function validateApiProfile(profile: ApiProfile, options: ValidateApiProfileOptions = {}): string | null {
   if (!profile.name.trim()) return i18n.t('errors.profile.missingName')
-  if (profile.provider !== 'fal' && !profile.baseUrl.trim() && !shouldUseApiProxy(profile.apiProxy)) return i18n.t('errors.profile.missingBaseUrl')
+  if (!profile.baseUrl.trim() && !shouldUseApiProxy(profile.apiProxy)) return i18n.t('errors.profile.missingBaseUrl')
   if (!profile.apiKey.trim() && !options.allowEmptyApiKey) return i18n.t('errors.profile.missingApiKey')
   if (!profile.model.trim()) return i18n.t('errors.profile.missingModel')
   return null

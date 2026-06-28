@@ -675,8 +675,6 @@
   },
   "settingsApiUrlExtras": {
     "proxyEnabledNote": "Proxy is on; the request target is decided by the deployment, and this setting is ignored.",
-    "falDefaultPrefix": "Defaults to ",
-    "falDefaultSuffix": "; a custom value is used as the fal.ai proxy URL.",
     "queryOverridePrefix": "Override via query string: "
   },
   "docker": {

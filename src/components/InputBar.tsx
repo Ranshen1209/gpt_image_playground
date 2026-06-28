@@ -761,16 +761,13 @@ export default function InputBar() {
     syncMentionTagSelection(el)
     setPrompt(getContentEditablePlainText(el))
   }, [setPrompt])
-  const activeProvider = activeProfile.provider
-  const isFalProvider = activeProvider === 'fal'
   const agentAutoImageCount = appMode === 'agent'
-  const moderationDisabled = isFalProvider
+  const moderationDisabled = false
   const transparentOutputAvailable = appMode === 'gallery'
   const showTransparentOutputControl = transparentOutputAvailable && params.output_format === 'png'
   const transparentOutputEnabled = transparentOutputAvailable && showTransparentOutputControl && params.transparent_output
-  const compressionDisabled = params.output_format === 'png' || isFalProvider
+  const compressionDisabled = params.output_format === 'png'
   const outputImageLimit = getOutputImageLimitForSettings(effectiveSettings)
-  const isFalTextToImage = false
   const nDraftValue = Number(nInput)
   const effectiveNValue = Number.isNaN(nDraftValue) ? params.n : nDraftValue
   const streamConcurrentByN = activeProfile.provider === 'openai' && activeProfile.streamImages === true && !agentAutoImageCount && effectiveNValue > 1
@@ -793,8 +790,8 @@ export default function InputBar() {
   }, [transparentOutputHint.hide])
   const compressionHint = useHintTooltip({ enabled: () => compressionDisabled })
   const moderationHint = useHintTooltip({ enabled: () => moderationDisabled })
-  const sizeHint = useHintTooltip({ enabled: () => isFalTextToImage })
-  const qualityHint = useHintTooltip({ enabled: () => activeProfile.codexCli || isFalProvider })
+  const sizeHint = useHintTooltip({ enabled: () => false })
+  const qualityHint = useHintTooltip({ enabled: () => activeProfile.codexCli })
   const nLimitHint = useHintTooltip({ autoHideMs: 2000 })
   const streamConcurrentHint = useHintTooltip({ enabled: () => streamConcurrentByN })
   const maskTargetImage = maskDraft
@@ -1913,8 +1910,6 @@ export default function InputBar() {
       params={params}
       setParams={setParams}
       activeProfile={activeProfile}
-      isFalProvider={isFalProvider}
-      isFalTextToImage={isFalTextToImage}
       displaySize={displaySize}
       qualityOptions={qualityOptions}
       selectClass={selectClass}

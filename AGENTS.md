@@ -23,8 +23,7 @@ maintained on `theme/sakrylle` in `Ranshen1209/sakrylle-image`.
 ## Hard Constraints
 
 - Preserve the multi-provider architecture. Do not remove OpenAI-compatible,
-  fal.ai, custom HTTP, Responses API, or Agent paths because Sakrylle is the
-  default.
+  custom HTTP, Responses API, or Agent paths because Sakrylle is the default.
 - The only Sakrylle image model is `gpt-image-2`
   (`src/lib/apiProfiles.ts::DEFAULT_IMAGES_MODEL`).
 - Sakrylle GPT-Image keys are group-scoped. `group_id=5` is the GPT-Image group
@@ -94,7 +93,6 @@ Docker runtime envs injected by `deploy/inject-api-url.sh`:
 - `src/lib/openaiCompatibleImageApi.ts` - OpenAI-compatible image calls,
   concurrent multi-image splitting, retry/refill behavior.
 - `src/lib/chatCompletionsImageApi.ts` - Sakrylle streaming image path.
-- `src/lib/falAiImageApi.ts` - fal.ai image provider path.
 - `src/lib/sakrylleAuth.ts` - OAuth PKCE, refresh rotation, OIDC token handling.
 - `src/lib/groupSelection.ts` - OAuth multi-group selection and group token
   lookup.

@@ -16,8 +16,6 @@ export default function InputParamsPanel({
   params,
   setParams,
   activeProfile,
-  isFalProvider,
-  isFalTextToImage,
   displaySize,
   qualityOptions,
   selectClass,
@@ -56,8 +54,6 @@ export default function InputParamsPanel({
   params: TaskParams
   setParams: (patch: Partial<TaskParams>) => void
   activeProfile: ApiProfile
-  isFalProvider: boolean
-  isFalTextToImage: boolean
   displaySize: string
   qualityOptions: Array<{ label: string; value: string }>
   selectClass: string
@@ -112,10 +108,6 @@ export default function InputParamsPanel({
         >
           {displaySize}
         </button>
-        <ButtonTooltip
-          visible={isFalTextToImage && sizeHint.visible}
-          text={<>fal.ai 的文生图模式不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
-        />
       </label>
       <label
         className="relative flex flex-col gap-0.5"
@@ -128,7 +120,7 @@ export default function InputParamsPanel({
       >
         <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
         <Select
-          value={activeProfile.codexCli ? 'auto' : isFalProvider && params.quality === 'auto' ? 'high' : params.quality}
+          value={activeProfile.codexCli ? 'auto' : params.quality}
           onChange={(val) => {
             if (!activeProfile.codexCli) setParams({ quality: val as TaskParams['quality'] })
           }}
@@ -139,8 +131,8 @@ export default function InputParamsPanel({
             : selectClass}
         />
         <ButtonTooltip
-          visible={(activeProfile.codexCli || isFalProvider) && qualityHint.visible}
-          text={isFalProvider ? <>fal.ai 不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 质量参数</> : 'Codex CLI 不支持质量参数'}
+          visible={activeProfile.codexCli && qualityHint.visible}
+          text="Codex CLI 不支持质量参数"
         />
       </label>
       <label className="flex flex-col gap-0.5">
@@ -218,7 +210,7 @@ export default function InputParamsPanel({
           />
           <ButtonTooltip
             visible={compressionHint.visible}
-            text={isFalProvider ? 'fal.ai 不支持压缩率参数' : '仅 JPEG 和 WebP 支持压缩率'}
+            text="仅 JPEG 和 WebP 支持压缩率"
           />
         </label>
       )}
@@ -245,10 +237,6 @@ export default function InputParamsPanel({
           className={moderationDisabled
             ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
             : selectClass}
-        />
-        <ButtonTooltip
-          visible={moderationDisabled && moderationHint.visible}
-          text="fal.ai 不支持审核参数"
         />
       </label>
       <label

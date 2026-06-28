@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  DEFAULT_FAL_BASE_URL,
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
   DEFAULT_SETTINGS,
-  createDefaultFalProfile,
   createDefaultOpenAIProfile,
   findEquivalentApiProfile,
   getActiveApiProfile,
@@ -415,19 +413,6 @@ describe('custom providers', () => {
     }))).toThrow('JSON 包含 Markdown 链接')
   })
 
-  it('does not inherit fal URL and model when switching to a custom provider', () => {
-    const provider = importCustomProviderDefinitionFromJson(JSON.stringify({
-      name: 'Custom Provider',
-      template: 'http-image',
-      submit: { path: 'images/generations' },
-    }))
-    const profile = switchApiProfileProvider(createDefaultFalProfile(), provider.id, provider)
-
-    expect(profile.provider).toBe(provider.id)
-    expect(profile.baseUrl).toBe(DEFAULT_SETTINGS.baseUrl)
-    expect(profile.model).toBe(DEFAULT_IMAGES_MODEL)
-  })
-
   it('defaults streaming on for OpenAI in all modes and preserves partial image count', () => {
     expect(createDefaultOpenAIProfile().streamImages).toBe(true)
     expect(createDefaultOpenAIProfile({ apiMode: 'responses' }).streamImages).toBe(true)
@@ -489,7 +474,30 @@ describe('custom providers', () => {
       ],
     })
 
-    expect(settings.providerOrder).toEqual(['fal', 'openai', 'custom-alpha', 'custom-beta'])
+    expect(settings.providerOrder).toEqual(['openai', 'custom-alpha', 'custom-beta'])
+  })
+
+  it('drops removed fal profile connection data when migrating to OpenAI-compatible provider', () => {
+    const settings = normalizeSettings({
+      profiles: [{
+        id: 'legacy-fal',
+        name: 'Legacy fal',
+        provider: 'fal',
+        baseUrl: 'https://removed-provider.example',
+        apiKey: 'legacy-key',
+        model: 'openai/gpt-image-2',
+        apiMode: 'images',
+      }],
+    })
+
+    expect(settings.profiles[0]).toMatchObject({
+      id: 'legacy-fal',
+      provider: 'openai',
+      baseUrl: DEFAULT_SETTINGS.baseUrl,
+      apiKey: '',
+      model: DEFAULT_IMAGES_MODEL,
+      apiMode: 'images',
+    })
   })
 
   it('keeps active custom providers in Images API mode when legacy apiMode is responses', () => {
@@ -516,10 +524,8 @@ describe('custom providers', () => {
     const provider = { id: 'custom-json', name: 'Custom JSON', submit: { path: 'images/generations' } }
     const openaiProfile = createDefaultOpenAIProfile({ apiMode: 'responses', streamImages: true })
 
-    const falProfile = switchApiProfileProvider(openaiProfile, 'fal')
     const customProfile = switchApiProfileProvider(openaiProfile, provider.id, provider)
 
-    expect(falProfile).toMatchObject({ provider: 'fal', apiMode: 'images', streamImages: false })
     expect(customProfile).toMatchObject({ provider: provider.id, apiMode: 'images', streamImages: false })
   })
 
@@ -539,22 +545,6 @@ describe('custom providers', () => {
     expect(DEFAULT_SETTINGS.allowPromptRewrite).toBe(false)
     expect(normalizeSettings({}).allowPromptRewrite).toBe(false)
     expect(normalizeSettings({ allowPromptRewrite: true }).allowPromptRewrite).toBe(true)
-  })
-
-  it('restores OpenAI-compatible URL after switching through fal.ai', () => {
-    const openaiProfile = createDefaultOpenAIProfile({
-      baseUrl: 'https://api.compat.example.com/v1',
-      model: 'custom-openai-model',
-      apiProxy: false,
-    })
-
-    const falProfile = switchApiProfileProvider(openaiProfile, 'fal')
-    const restoredProfile = switchApiProfileProvider(falProfile, 'openai')
-
-    expect(falProfile.baseUrl).toBe(DEFAULT_FAL_BASE_URL)
-    expect(restoredProfile.baseUrl).toBe('https://api.compat.example.com/v1')
-    expect(restoredProfile.model).toBe('custom-openai-model')
-    expect(restoredProfile.apiProxy).toBe(false)
   })
 
   it('preserves the selected Agent image generation profile', () => {

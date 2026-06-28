@@ -48,7 +48,6 @@ import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSin
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { getImageFetchCorsHint, mergeActualParams, messageContainsImageFetchCorsHint } from './lib/imageApiShared'
-import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
 import { getCustomQueuedImageResult } from './lib/openaiCompatibleImageApi'
 import {
   SENTINEL_AGENT_STOPPED,
@@ -89,9 +88,7 @@ const AGENT_INPUT_DRAFT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000
 //   en: @Round{round}Image{image}（大小写不敏感，允许空格）
 const AGENT_ROUND_IMAGE_MENTION_RE = /@(?:(?:第)?(\d+)轮图(\d+))|@[Rr]ound\s*(\d+)\s*[Ii]mage\s*(\d+)/g
 const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const FAL_RECOVERY_POLL_MS = 10_000
 const CUSTOM_RECOVERY_POLL_MS = 10_000
-const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const customRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const agentRoundControllers = new Map<string, AbortController>()
 let agentConversationPersistenceReady = false
@@ -2140,29 +2137,6 @@ async function resolveImageSizeParamsList(
 }
 
 
-async function completeRecoveredFalTask(task: TaskRecord, result: Awaited<ReturnType<typeof getFalQueuedImageResult>>) {
-  const latest = useStore.getState().tasks.find((item) => item.id === task.id)
-  if (!latest || latest.status === 'done') return
-
-  const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images)
-  const actualParamsList = await resolveImageSizeParamsList(outputDataUrls, result.actualParamsList, outputImageSizes)
-
-  updateTaskInStore(task.id, {
-    outputImages: outputIds,
-    transparentOriginalImages: transparentOriginalImageIds,
-    actualParams: firstActualParams(actualParamsList),
-    actualParamsByImage: mapActualParamsByImage(outputIds, actualParamsList),
-    revisedPromptByImage: undefined,
-    status: 'done',
-    error: null,
-    falRecoverable: false,
-    finishedAt: Date.now(),
-    elapsed: Date.now() - task.createdAt,
-  })
-  useStore.getState().showToast(`fal.ai 任务已恢复，共 ${outputIds.length} 张图片`, 'success')
-  if (!isAgentTask(task)) showTaskCompletionNotification('图像生成完成', `fal.ai 任务已恢复，共 ${outputIds.length} 张图片。`)
-}
-
 function isAsyncCustomProviderTask(settings: AppSettings, provider: string, hasInputImages: boolean) {
   const customProvider = getCustomProviderDefinition(settings, provider)
   if (!customProvider?.poll) return false
@@ -2170,39 +2144,18 @@ function isAsyncCustomProviderTask(settings: AppSettings, provider: string, hasI
   return Boolean(submitMapping.taskIdPath)
 }
 
-function getFalRecoveryProfile(settings: AppSettings, task: TaskRecord) {
-  const taskProfile = getTaskApiProfile(settings, task)
-  if (taskProfile?.provider === 'fal') return taskProfile
-  return null
-}
-
 function getCustomRecoveryProfile(settings: AppSettings, task: TaskRecord) {
   const provider = task.apiProvider
-  if (!provider || provider === 'openai' || provider === 'fal') return null
+  if (!provider || provider === 'openai') return null
   const taskProfile = getTaskApiProfile(settings, task)
   if (taskProfile?.provider === provider) return taskProfile
   return null
 }
 
-function isFalConnectionRecoverableError(err: unknown) {
+function isAsyncConnectionRecoverableError(err: unknown) {
   if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') return true
   const message = err instanceof Error ? err.message : String(err)
   return /abort|network|failed to fetch|fetch failed|load failed|timeout|连接|断开|中断/i.test(message)
-}
-
-function clearFalRecoveryTimer(taskId: string) {
-  const timer = falRecoveryTimers.get(taskId)
-  if (timer) clearTimeout(timer)
-  falRecoveryTimers.delete(taskId)
-}
-
-function scheduleFalRecovery(taskId: string, delayMs = FAL_RECOVERY_POLL_MS) {
-  if (falRecoveryTimers.has(taskId)) return
-  const timer = setTimeout(() => {
-    falRecoveryTimers.delete(taskId)
-    recoverFalTask(taskId)
-  }, delayMs)
-  falRecoveryTimers.set(taskId, timer)
 }
 
 function clearCustomRecoveryTimer(taskId: string) {
@@ -2218,40 +2171,6 @@ function scheduleCustomRecovery(taskId: string, delayMs = CUSTOM_RECOVERY_POLL_M
     recoverCustomTask(taskId)
   }, delayMs)
   customRecoveryTimers.set(taskId, timer)
-}
-
-async function recoverFalTask(taskId: string) {
-  const { settings, tasks } = useStore.getState()
-  const task = tasks.find((item) => item.id === taskId)
-  if (!task || task.apiProvider !== 'fal' || !task.falRequestId || !task.falEndpoint || task.status === 'done') return
-
-  const profile = getFalRecoveryProfile(settings, task)
-  if (!profile) {
-    scheduleFalRecovery(taskId)
-    return
-  }
-
-  try {
-    const result = await getFalQueuedImageResult(profile, task.falEndpoint, task.falRequestId, task.params)
-    clearFalRecoveryTimer(taskId)
-    await completeRecoveredFalTask(task, result)
-    return
-  } catch (err) {
-    if (isFalConnectionRecoverableError(err)) {
-      scheduleFalRecovery(taskId)
-      return
-    }
-
-    clearFalRecoveryTimer(taskId)
-    updateTaskInStore(taskId, {
-      status: 'error',
-      error: getFalErrorMessage(err) ?? (err instanceof Error ? err.message : String(err)),
-      ...getRawErrorPayload(err),
-      falRecoverable: false,
-      finishedAt: Date.now(),
-      elapsed: Date.now() - task.createdAt,
-    })
-  }
 }
 
 
@@ -2443,14 +2362,6 @@ export async function initStore() {
   }
 
   for (const task of tasks) {
-    if (
-      task.apiProvider === 'fal' &&
-      task.falRequestId &&
-      task.falEndpoint &&
-      (task.status === 'running' || task.falRecoverable)
-    ) {
-      scheduleFalRecovery(task.id, 0)
-    }
     if (
       task.customTaskId &&
       (task.status === 'running' || task.customRecoverable)
@@ -2673,7 +2584,6 @@ function markAgentRoundTasksFailed(
       status: 'error',
       error,
       ...(rawResponsePayload ? { rawResponsePayload } : {}),
-      falRecoverable: false,
       customRecoverable: false,
       finishedAt: now,
       elapsed: Math.max(0, now - task.createdAt),
@@ -3855,7 +3765,6 @@ async function executeAgentRound(
         status: 'error',
         error,
         rawResponsePayload,
-        falRecoverable: false,
         customRecoverable: false,
         finishedAt: Date.now(),
         elapsed: Date.now() - latestTask.createdAt,
@@ -4644,15 +4553,11 @@ async function executeTask(taskId: string) {
   const activeProfile = taskProfile ?? getActiveApiProfile(settings)
   const requestSettings = createSettingsForApiProfile(settings, activeProfile)
   const taskProvider = task.apiProvider ?? activeProfile.provider
-  let falRequestInfo: { requestId: string; endpoint: string } | null = task.falRequestId && task.falEndpoint
-    ? { requestId: task.falRequestId, endpoint: task.falEndpoint }
-    : null
   let customTaskInfo: { taskId: string } | null = task.customTaskId
     ? { taskId: task.customTaskId }
     : null
 
   if (
-    taskProvider !== 'fal' &&
     !isAsyncCustomProviderTask(requestSettings, taskProvider, task.inputImageIds.length > 0) &&
     !usesConcurrentOpenAIImageRequests(activeProfile, task.params)
   ) {
@@ -4683,14 +4588,6 @@ async function executeTask(taskId: string) {
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
-      onFalRequestEnqueued: (request) => {
-        falRequestInfo = request
-        updateTaskInStore(taskId, {
-          falRequestId: request.requestId,
-          falEndpoint: request.endpoint,
-          falRecoverable: false,
-        })
-      },
       onCustomTaskEnqueued: (request) => {
         customTaskInfo = request
         updateTaskInStore(taskId, {
@@ -4713,14 +4610,13 @@ async function executeTask(taskId: string) {
 
     // 存储输出图片
     const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images)
-    const isAsyncCustomTask = taskProvider !== 'fal' && taskProvider !== 'openai' && Boolean(customTaskInfo)
+    const isAsyncCustomTask = taskProvider !== 'openai' && Boolean(customTaskInfo)
     const actualParamsList = await resolveImageSizeParamsList(
       outputDataUrls,
       isAsyncCustomTask ? undefined : result.actualParamsList,
       outputImageSizes,
     )
     const actualParams = (() => {
-      if (taskProvider === 'fal') return firstActualParams(actualParamsList)
       if (isAsyncCustomTask) return firstActualParams(actualParamsList)
       const firstParams = firstActualParams(actualParamsList)
       return {
@@ -4729,7 +4625,7 @@ async function executeTask(taskId: string) {
         n: outputIds.length,
       }
     })()
-    const shouldStoreRevisedPrompts = taskProvider !== 'fal' && !isAsyncCustomTask
+    const shouldStoreRevisedPrompts = !isAsyncCustomTask
     const actualParamsByImage = mapActualParamsByImage(outputIds, actualParamsList)
     const revisedPromptByImage = shouldStoreRevisedPrompts ? result.revisedPrompts?.reduce<Record<string, string>>((acc, revisedPrompt, index) => {
       const imgId = outputIds[index]
@@ -4805,22 +4701,8 @@ async function executeTask(taskId: string) {
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
     if (latestTask.status !== 'running') return
     useStore.getState().setTaskStreamPreview(taskId)
-    const latestFalRequestInfo = falRequestInfo ?? (latestTask.falRequestId && latestTask.falEndpoint
-      ? { requestId: latestTask.falRequestId, endpoint: latestTask.falEndpoint }
-      : null)
     const latestCustomTaskInfo = customTaskInfo ?? (latestTask.customTaskId ? { taskId: latestTask.customTaskId } : null)
-    if (latestTask.apiProvider === 'fal' && latestFalRequestInfo && isFalConnectionRecoverableError(err)) {
-      updateTaskInStore(taskId, {
-        status: 'error',
-        error: i18n.t('errors.falConnectionDropped'),
-        falRequestId: latestFalRequestInfo.requestId,
-        falEndpoint: latestFalRequestInfo.endpoint,
-        falRecoverable: true,
-        finishedAt: Date.now(),
-        elapsed: Date.now() - task.createdAt,
-      })
-      scheduleFalRecovery(taskId)
-    } else if (latestCustomTaskInfo && isFalConnectionRecoverableError(err)) {
+    if (latestCustomTaskInfo && isAsyncConnectionRecoverableError(err)) {
       updateTaskInStore(taskId, {
         status: 'error',
         error: i18n.t('errors.customAsyncConnectionDropped'),
@@ -4851,7 +4733,6 @@ async function executeTask(taskId: string) {
         status: 'error',
         error: errorMessage,
         ...getRawErrorPayload(err),
-        falRecoverable: false,
         customRecoverable: false,
         finishedAt: Date.now(),
         elapsed: Date.now() - task.createdAt,
