@@ -109,7 +109,9 @@ Docker runtime envs injected by `deploy/inject-api-url.sh`:
 - `index.html` - title, body class, first-paint FOUC guard, metadata.
 - `deploy/Dockerfile`, `deploy/inject-api-url.sh` - Docker build/runtime config
   injection.
-- `wrangler.jsonc` - Cloudflare deploy target for `npm run deploy:cf`.
+- `.github/workflows/docker.yml` - production Docker image build/push workflow.
+- `wrangler.jsonc` - optional Cloudflare Assets target; not the current
+  production path for `image.sakrylle.com`.
 
 ## i18n Rules
 
@@ -157,7 +159,6 @@ npm run test:watch
 npx vitest run src/lib/someFile.test.ts
 npm run build
 npm run preview
-npm run deploy:cf
 ```
 
 Run focused tests for touched areas when possible. Important suites include:
@@ -180,12 +181,19 @@ If changing default API literals, update matching test assertions.
 
 ## Release And Deployment
 
-- For production Cloudflare deployment, use `npm run deploy:cf`; it runs
-  `npm run build` before `wrangler deploy`.
+- Production currently runs on the Tokyo Docker host (`tokyo-server`) via
+  `/opt/stack/docker-compose.yml`.
+- Production service: `gpt-image-playground`.
+- Production image:
+  `ghcr.io/ranshen1209/gpt_image_playground:latest`.
+- To deploy production, push `theme/sakrylle`, run the GitHub Actions
+  `docker.yml` workflow with `workflow_dispatch`, then on `tokyo-server` run:
+  `cd /opt/stack && docker compose pull gpt-image-playground && docker compose up -d gpt-image-playground`.
+- `npm run deploy:cf` deploys to Cloudflare via Wrangler and requires
+  `CLOUDFLARE_API_TOKEN`; do not treat it as the production Docker path unless
+  hosting changes.
 - Bump both `package.json` version and `public/sw.js` cache name for formal
   releases. Otherwise old Service Worker chunks may remain active.
-- Docker image is published to
-  `ghcr.io/ranshen1209/gpt_image_playground:latest`.
 - GitHub Actions Docker build is normally triggered manually with
   `workflow_dispatch`; do not rely on tag push alone.
 - Rollback must use a recorded image digest. The `latest` tag moves.
