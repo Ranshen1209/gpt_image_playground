@@ -82,6 +82,7 @@ describe('callAgentResponsesApi', () => {
     const failures: Array<{ toolCallId: string; error: string }> = []
     const profile = createDefaultOpenAIProfile({
       apiKey: 'test-key',
+      baseUrl: 'https://api.openai.com/v1',
       apiMode: 'responses',
       streamImages: true,
     })
@@ -404,6 +405,7 @@ describe('callAgentResponsesApi', () => {
     const outputItemSnapshots: number[] = []
     const profile = createDefaultOpenAIProfile({
       apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
       apiMode: "responses",
       streamImages: true,
     })

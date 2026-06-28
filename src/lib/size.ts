@@ -217,6 +217,15 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
   const presetRatioKey = getPresetRatioKey(ratioWidth, ratioHeight)
   if (presetRatioKey) return COMMON_SIZE_PRESETS[tier][presetRatioKey]
 
+  return calculateImageSizeByBudget(tier, ratio)
+}
+
+export function calculateImageSizeByBudget(tier: SizeTier, ratio: string) {
+  const parsed = parseRatio(ratio)
+  if (!parsed) return null
+
+  const { width: ratioWidth, height: ratioHeight } = parsed
+
   const targetRatio = ratioWidth / ratioHeight
   const pixelBudget = IMAGE_SIZE_TIER_PIXEL_BUDGET[tier]
 

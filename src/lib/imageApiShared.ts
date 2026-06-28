@@ -1,5 +1,6 @@
 import type { AppSettings, TaskParams } from '../types'
 import { blobToDataUrl } from './dataUrl'
+import i18n from './i18n'
 
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
@@ -17,6 +18,8 @@ export interface CallApiOptions {
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
   maskDataUrl?: string
+  onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
+  onCustomTaskEnqueued?: (task: { taskId: string }) => void
   onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number; final?: boolean }) => void
 }
 
@@ -87,6 +90,21 @@ export function assertMaskEditFileSize(label: string, bytes: number) {
 export const IMAGE_FETCH_CORS_HINT = ' 可点链接按钮复制结果链接，或尝试开启「返回 Base64 图片数据」避免此问题。'
 export const STREAMING_UNSUPPORTED_HINT = '提示：当前使用的 API 可能不支持流式传输，请尝试关闭「流式传输」功能。'
 export const STREAMING_FORMAT_HINT = '提示：API 返回了无法解析的流式数据格式，请尝试关闭「流式传输」功能。'
+
+const LEGACY_IMAGE_FETCH_CORS_HINTS: ReadonlyArray<string> = [
+  IMAGE_FETCH_CORS_HINT,
+  ' Use the link button to copy the result link, or enable "Return Base64 image data" to avoid this.',
+]
+
+export function getImageFetchCorsHint(): string {
+  return i18n.t('errors.imageFetchCorsHint')
+}
+
+export function messageContainsImageFetchCorsHint(message: string): boolean {
+  if (!message) return false
+  if (message.includes(getImageFetchCorsHint())) return true
+  return LEGACY_IMAGE_FETCH_CORS_HINTS.some((hint) => message.includes(hint))
+}
 
 export function appendStreamingUnsupportedHint(message: string): string {
   return message ? `${message}\n${STREAMING_UNSUPPORTED_HINT}` : STREAMING_UNSUPPORTED_HINT

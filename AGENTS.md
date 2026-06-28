@@ -1,61 +1,64 @@
 # AGENTS.md
 
-Agent instructions for this repository. `CLAUDE.md` is the full operational
-runbook and remains the source of truth; keep this file aligned with it when
-project facts change.
+Repository operating guide for agents working on Sakrylle Image. This file is
+standalone and should be updated whenever project facts, deployment behavior, or
+Sakrylle-specific product constraints change.
 
-## Project Shape
+## Project Snapshot
 
-Sakrylle Image is a fork of `CookSleep/gpt_image_playground`, maintained on the
-`theme/sakrylle` branch as `Ranshen1209/sakrylle-image`.
+Sakrylle Image is a Sakrylle-branded fork of `CookSleep/gpt_image_playground`,
+maintained on `theme/sakrylle` in `Ranshen1209/sakrylle-image`.
 
-- Pure frontend SPA: React 19, TypeScript, Vite 6, Tailwind 3, Zustand 5,
+- Frontend-only SPA: React 19, TypeScript, Vite 6, Tailwind 3, Zustand 5,
   i18next.
-- No backend in this repo. User data lives in browser IndexedDB/localStorage;
-  image calls go to API providers directly.
+- No backend is shipped from this repo. Browser data lives in
+  IndexedDB/localStorage, and provider calls are made from the browser unless a
+  deployment explicitly enables a proxy.
 - Production site: `https://image.sakrylle.com`.
-- Default Sakrylle API base must be `https://api.sakrylle.com/v1`.
-- Sakrylle OAuth lives at `https://sub.sakrylle.com`.
+- Default Sakrylle API base: `https://api.sakrylle.com/v1`.
+- Sakrylle OAuth/OIDC base: `https://oidc1.sakrylle.com`.
+- Production intentionally uses direct browser calls to
+  `https://api.sakrylle.com/v1`; nginx proxy support is opt-in only.
 
-## Non-Negotiables
+## Hard Constraints
 
 - Preserve the multi-provider architecture. Do not remove OpenAI-compatible,
-  fal.ai, custom HTTP, Responses API, or Agent paths just because Sakrylle is the
+  fal.ai, custom HTTP, Responses API, or Agent paths because Sakrylle is the
   default.
 - The only Sakrylle image model is `gpt-image-2`
   (`src/lib/apiProfiles.ts::DEFAULT_IMAGES_MODEL`).
-- Sakrylle GPT-Image group keys are group-scoped. `group_id=5` is the GPT-Image
-  group with image generation enabled.
-- Keep OAuth PKCE, OAuth Bearer fallback, multi-group selection, and OIDC feature
-  flag behavior intact unless the task is explicitly changing them.
-- Do not store translated runtime error/status strings in persistent data. Use
-  sentinels from `src/lib/agentSentinels.ts` so language switching keeps old
-  records correct.
-- Brand name `Sakrylle` is not translated. Technical words such as API, URL,
-  API Key, token, and OAuth stay in English.
-- Rebase or UI work must preserve the Sakrylle visual system: Monet purple
-  palette, Liquid Glass utilities, ambient body class, Sakrylle logo, and dark
-  first-paint FOUC guard.
+- Sakrylle GPT-Image keys are group-scoped. `group_id=5` is the GPT-Image group
+  with image generation enabled.
+- Keep OAuth PKCE, OAuth Bearer fallback, multi-group selection, and OIDC
+  feature flag behavior intact unless the task explicitly changes auth.
+- OAuth Bearer fallback is allowed only for official Sakrylle base URLs and only
+  when granted scopes allow the requested mode.
+- Do not persist translated runtime error/status strings. Use sentinels from
+  `src/lib/agentSentinels.ts` so old records remain correct after language
+  switches.
+- `Sakrylle` is not translated. Technical words such as API, URL, API Key,
+  token, and OAuth stay in English.
+- Rebase and UI work must preserve the Sakrylle visual system: Monet purple
+  palette, Liquid Glass utilities, ambient body class, Sakrylle logo, and the
+  dark first-paint FOUC guard.
 
 ## API And Auth Facts
 
 - Images API:
   - `POST /v1/images/generations`
   - `POST /v1/images/edits`
-- Sakrylle default image path uses streaming `POST /v1/chat/completions` for
-  text/image/mask generation when `streamChatCompletionsImage` is enabled.
+- Sakrylle default image generation uses streaming
+  `POST /v1/chat/completions` when `streamChatCompletionsImage` is enabled.
 - Responses API:
   - `POST /v1/responses`
-  - Used for Agent multi-turn conversations and streaming image flows.
+  - Used by Agent multi-turn conversations and streaming image flows.
 - Platform API:
   - `GET /v1/me`
   - `GET /v1/account/balance`
   - `GET /v1/models`
-- OAuth Bearer fallback is allowed only for official Sakrylle base URLs and only
-  when scopes allow the requested mode.
 - Canonical v2 scopes:
   `profile:read account:read account:balance:read models:read images:create responses:create offline_access`.
-  OIDC adds `openid profile email`.
+- OIDC adds `openid profile email`.
 - Current billing is per successful request, not token-based.
 
 ## Environment Variables
@@ -67,6 +70,7 @@ Build-time Vite envs:
 - `VITE_SAKRYLLE_OAUTH_BASE`
 - `VITE_SAKRYLLE_OAUTH_CLIENT_ID`
 - `VITE_SAKRYLLE_OIDC_ENABLED`
+- `VITE_SAKRYLLE_OIDC_ISSUER`
 
 Docker runtime envs injected by `deploy/inject-api-url.sh`:
 
@@ -76,22 +80,21 @@ Docker runtime envs injected by `deploy/inject-api-url.sh`:
 - `OAUTH_BASE`
 - `OAUTH_CLIENT_ID`
 - `OIDC_ENABLED`
+- `OIDC_ISSUER`
 - `API_PROXY_URL`
 - `HOST`
 - `PORT`
 
-Production intentionally uses browser direct calls to
-`https://api.sakrylle.com/v1`; the nginx API proxy is disabled unless explicitly
-configured otherwise.
-
 ## Key Files
 
-- `src/store.ts` - main Zustand store, task lifecycle, Agent lifecycle, image
-  cache subscriptions, import/export.
-- `src/lib/apiProfiles.ts` - provider profiles, defaults, validation.
+- `src/store.ts` - Zustand store, task lifecycle, Agent lifecycle, image cache
+  subscriptions, import/export.
+- `src/lib/apiProfiles.ts` - provider profiles, defaults, validation, model
+  constants.
 - `src/lib/openaiCompatibleImageApi.ts` - OpenAI-compatible image calls,
   concurrent multi-image splitting, retry/refill behavior.
 - `src/lib/chatCompletionsImageApi.ts` - Sakrylle streaming image path.
+- `src/lib/falAiImageApi.ts` - fal.ai image provider path.
 - `src/lib/sakrylleAuth.ts` - OAuth PKCE, refresh rotation, OIDC token handling.
 - `src/lib/groupSelection.ts` - OAuth multi-group selection and group token
   lookup.
@@ -106,6 +109,7 @@ configured otherwise.
 - `index.html` - title, body class, first-paint FOUC guard, metadata.
 - `deploy/Dockerfile`, `deploy/inject-api-url.sh` - Docker build/runtime config
   injection.
+- `wrangler.jsonc` - Cloudflare deploy target for `npm run deploy:cf`.
 
 ## i18n Rules
 
@@ -114,29 +118,28 @@ configured otherwise.
 - Components should use `useTranslation()`.
 - Non-component libs can import `i18n` and call `i18n.t(...)`.
 - Persistent messages must use sentinels rather than translated strings.
-- Existing profile default names such as `新配置`, `默认`, and `（复制）` are
-  persisted data and need migration care before changing.
+- Existing profile names such as `新配置`, `默认`, and `（复制）` are persisted
+  data and need migration care before changing.
 
-## Theme And Branding Rules
+## Theme And Branding
 
 - `index.html` must keep the dark-mode first-paint IIFE before blocking styles.
 - `body` must keep the `sakrylle-ambient` class.
 - New glass-like UI should reuse `.glass-panel`, `.glass-card`,
-  `.glass-input-shell`, `.glass-button`, and `.glass-button-primary` from
-  `src/index.css`.
+  `.glass-input-shell`, `.glass-button`, and `.glass-button-primary`.
 - Avoid reintroducing Tailwind `blue-*` styling in Sakrylle UI. Use the existing
-  Monet purple values/palette.
+  Monet purple values and palette.
 - `src/components/icons.tsx::SakrylleLogo` is the canonical logo. Do not restore
   the old `public/pwa-icon.svg` flow.
 - Header intentionally removed the install-app prompt and help modal entry.
 
 ## Multi-Image Behavior
 
-For Sakrylle `gpt-image-2`, upstream ignores single-request `n>1`; the app must
-split multi-image requests into parallel `n:1` calls.
+For Sakrylle `gpt-image-2`, upstream ignores single-request `n > 1`; the app
+must split multi-image requests into parallel `n:1` calls.
 
 - `MAX_CONCURRENT_IMAGE_REQUESTS` is intentionally 6.
-- Retry/refill behavior should preserve partial success handling and avoid
+- Retry/refill behavior must preserve partial success handling and avoid
   unlimited extra paid requests.
 - A fully successful refill should not surface as partial failure; exhausted
   refill budget should keep successful images and show partial failure.
@@ -175,10 +178,12 @@ Run focused tests for touched areas when possible. Important suites include:
 
 If changing default API literals, update matching test assertions.
 
-## Release And Deployment Notes
+## Release And Deployment
 
-- Bump both `package.json` version and `public/sw.js` cache name for releases.
-  Otherwise old Service Worker chunks may remain active.
+- For production Cloudflare deployment, use `npm run deploy:cf`; it runs
+  `npm run build` before `wrangler deploy`.
+- Bump both `package.json` version and `public/sw.js` cache name for formal
+  releases. Otherwise old Service Worker chunks may remain active.
 - Docker image is published to
   `ghcr.io/ranshen1209/gpt_image_playground:latest`.
 - GitHub Actions Docker build is normally triggered manually with
@@ -222,12 +227,12 @@ When upstream adds UI, check for `blue-*` Tailwind classes and convert them to
 the Sakrylle palette. `src/components/HelpModal.tsx` is intentionally deleted;
 keep it deleted unless the product decision changes.
 
-## OIDC Documentation Governance
+## Documentation Governance
 
-`oidc-docs/` is product-local documentation for Sakrylle Image only. Shared
-platform identity docs are canonical in `../sub2api/sakrylle-docs/`.
+This repo now keeps agent-facing project facts in `AGENTS.md`. Shared platform
+identity contracts remain outside this repo in the Sakrylle/sub2api docs.
 
 When changing OAuth/OIDC client behavior, `VITE_SAKRYLLE_*` envs,
 `OIDC_ENABLED`, token storage, discovery, nonce/id_token handling, logout/revoke,
-group routing, or Image rollout status, update local `oidc-docs/` in the same
-change and update center docs if the shared platform contract changes.
+group routing, or Image rollout status, update the shared platform docs if the
+shared contract changes.

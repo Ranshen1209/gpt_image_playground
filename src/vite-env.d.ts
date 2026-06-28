@@ -14,6 +14,7 @@ interface ImportMetaEnv {
   readonly VITE_SAKRYLLE_OAUTH_BASE?: string
   readonly VITE_SAKRYLLE_OAUTH_CLIENT_ID?: string
   readonly VITE_SAKRYLLE_OIDC_ENABLED?: string
+  readonly VITE_SAKRYLLE_OIDC_ISSUER?: string
 }
 
 interface ImportMeta {

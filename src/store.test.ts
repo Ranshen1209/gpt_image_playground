@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { DEFAULT_PARAMS } from './types'
-import { createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
+import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_IMAGES_MODEL, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from './lib/apiProfiles'
 import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from './types'
 import { getSelectedImageMentionLabel } from './lib/promptImageMentions'
 import { SENTINEL_OPENAI_INTERRUPTED } from './lib/agentSentinels'
@@ -1735,7 +1735,7 @@ describe('agent context for removed outputs', () => {
     const state = useStore.getState()
     expect(state.tasks.map((item) => item.id)).toEqual(['done-task', 'running-task'])
     expect(state.selectedTaskIds).toEqual(['done-task'])
-    expect(state.showToast).toHaveBeenCalledWith('已删除 2 个任务', 'success')
+    expect(state.showToast).toHaveBeenCalledWith('已删除 2 条记录', 'success')
   })
 
   it('matches partial failures in failed filters and searches error text', () => {
@@ -1970,8 +1970,13 @@ describe('agent batch reference resolution', () => {
     await clearImages()
     await putImage(imageA)
     await putImage(imageB)
-    vi.mocked(callAgentResponsesApi).mockClear()
-    vi.mocked(callBatchImageSingle).mockClear()
+    vi.mocked(callAgentResponsesApi).mockReset()
+    vi.mocked(callBatchImageSingle).mockReset()
+    vi.mocked(callBatchImageSingle).mockImplementation(async (opts: { batchItemId: string; prompt: string }) => ({
+      batchItemId: opts.batchItemId,
+      image: { dataUrl: 'data:image/png;base64,batch-output', revisedPrompt: opts.prompt },
+      error: null,
+    }))
     useStore.setState({
       settings: normalizeSettings({
         ...DEFAULT_SETTINGS,

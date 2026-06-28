@@ -593,6 +593,31 @@ export default function SettingsModal() {
     })
   ]
 
+  const handleProviderReorder = (sourceValue: string | number, targetValue: string | number, position: 'before' | 'after' | null) => {
+    if (!position) return
+    const source = String(sourceValue)
+    const target = String(targetValue)
+    if (source === target || source === ADD_CUSTOM_PROVIDER_VALUE || target === ADD_CUSTOM_PROVIDER_VALUE) return
+
+    const validProviders = new Set(defaultProviderOrder)
+    const ordered = [
+      ...providerOrder.filter((provider) => validProviders.has(provider)),
+      ...defaultProviderOrder.filter((provider) => !providerOrder.includes(provider)),
+    ].filter((provider, index, array) => array.indexOf(provider) === index)
+
+    const withoutSource = ordered.filter((provider) => provider !== source)
+    const targetIndex = withoutSource.indexOf(target)
+    if (targetIndex < 0) return
+
+    const insertIndex = position === 'before' ? targetIndex : targetIndex + 1
+    const nextOrder = [
+      ...withoutSource.slice(0, insertIndex),
+      source,
+      ...withoutSource.slice(insertIndex),
+    ]
+    commitSettings({ ...draft, providerOrder: nextOrder })
+  }
+
   const getDefaultModelForMode = (apiMode: AppSettings['apiMode']) =>
     apiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL
 
@@ -1874,7 +1899,7 @@ export default function SettingsModal() {
                     <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
                       {t('settings.api.streamPartialImagesHint')}
                     </div>
-                  </div>
+                  </label>
                 </div>
               )}
 

@@ -53,6 +53,16 @@ export async function blobToDataUrl(blob: Blob): Promise<string> {
   })
 }
 
+export interface ImageDimensions {
+  width: number
+  height: number
+}
+
+export async function getImageDimensions(dataUrl: string): Promise<ImageDimensions> {
+  const image = await loadImage(dataUrl)
+  return { width: image.naturalWidth, height: image.naturalHeight }
+}
+
 // ---------------------------------------------------------------------------
 // Upload-time image compression (spec 2026-06-10-input-image-compression)
 //

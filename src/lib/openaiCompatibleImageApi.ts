@@ -42,7 +42,11 @@ function getStreamPartialImages(profile: ApiProfile): number {
 }
 
 export function shouldUseChatImagePath(profile: ApiProfile): boolean {
-  return profile.streamChatCompletionsImage === true && isSakrylleApiBaseUrl(profile.baseUrl)
+  return profile.provider === 'openai' &&
+    profile.apiMode === 'images' &&
+    !profile.codexCli &&
+    profile.streamChatCompletionsImage === true &&
+    isSakrylleApiBaseUrl(profile.baseUrl)
 }
 
 /** 并发拆分子请求的最大同时在飞数。实测 api.sakrylle.com 单用户并发墙=6（7+ 触发 429
@@ -795,9 +799,10 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
 }
 
 async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
-  if (shouldUseChatImagePath(profile)) {
-    return callImagesApiViaChat(opts, profile)
-  }
+  const proxyConfig = readClientDevProxyConfig()
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  if (!useApiProxy && shouldUseChatImagePath(profile)) return callImagesApiViaChat(opts, profile)
+
   const { prompt: originalPrompt, inputImageDataUrls } = opts
   const params = getSakrylleImageRequestParams(opts.params, profile)
   const prompt = profile.codexCli && !opts.settings.allowPromptRewrite
@@ -806,8 +811,6 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
   const isEdit = inputImageDataUrls.length > 0
   const shouldStreamImages = profile.streamImages && !(isEdit && isSakrylleApiBaseUrl(profile.baseUrl))
   const mime = MIME_MAP[params.output_format] || 'image/png'
-  const proxyConfig = readClientDevProxyConfig()
-  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
   const requestHeaders = await createRequestHeaders(profile)
 
   const controller = new AbortController()

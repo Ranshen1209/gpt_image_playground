@@ -37,9 +37,12 @@ function createUrlProfileId(usedIds: Set<string>) {
 function pickUrlSettingsPayload(value: unknown): unknown | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
+  const customProviders = Array.isArray(record.customProviders) ? record.customProviders : undefined
+  const profiles = Array.isArray(record.profiles) ? record.profiles : undefined
+  if (!customProviders?.length && !profiles?.length) return null
   return {
-    customProviders: record.customProviders,
-    profiles: record.profiles,
+    customProviders,
+    profiles,
   }
 }
 
@@ -169,7 +172,7 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
   const streamPartialImagesParam = searchParams.get('streamPartialImages')
   const apiMode: ApiMode | undefined = apiModeParam === 'images' || apiModeParam === 'responses' ? apiModeParam : undefined
 
-  const hasLegacyOpenAIParams = apiUrlParam !== null || apiKeyParam !== null || codexCliParam !== null || apiMode !== undefined || modelParam !== null || profileNameParam !== null || streamImagesParam !== null || streamPartialImagesParam !== null
+  const hasLegacyOpenAIParams = apiKeyParam !== null || codexCliParam !== null || apiMode !== undefined || modelParam !== null || profileNameParam !== null || streamImagesParam !== null || streamPartialImagesParam !== null
   const settings = importedSettings == null
     ? normalizeSettings(currentSettings)
     : activateFirstImportedProfile(mergeImportedSettings(currentSettings, importedSettings), importedSettings)
@@ -182,7 +185,6 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
       apiMode: profileApiMode,
       model: profileApiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL,
     })
-    if (apiUrlParam !== null) profile.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
     if (apiKeyParam !== null) profile.apiKey = apiKeyParam.trim()
     if (modelParam !== null && modelParam.trim()) profile.model = modelParam.trim()
     if (profileName) profile.name = profileName

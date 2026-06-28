@@ -1945,11 +1945,11 @@ function isSakrylleApiBaseUrl(baseUrl: string): boolean {
 }
 
 function isImagesApiProfile(profile: ApiProfile | null | undefined): profile is ApiProfile {
-  return Boolean(profile && profile.provider === 'openai' && profile.apiMode === 'images')
+  return Boolean(profile && profile.apiMode === 'images')
 }
 
 function normalizeGalleryImageProfile(profile: ApiProfile): ApiProfile {
-  if (profile.model === DEFAULT_RESPONSES_MODEL) {
+  if (profile.provider === 'openai' && profile.model === DEFAULT_RESPONSES_MODEL) {
     return { ...profile, model: DEFAULT_IMAGES_MODEL }
   }
   return profile
@@ -3734,9 +3734,7 @@ async function executeAgentRound(
     const appManagedImageProfile = resolveGalleryImageApiProfile(requestSettings, activeProfile)
     const shouldRunImageCallsWithGalleryApi = Boolean(appManagedImageProfile) || isSakrylleApiBaseUrl(activeProfile.baseUrl)
 
-    const apiInput = await buildAgentApiInput(conversation, round, latestState.tasks, {
-      includeImageDataUrls: !shouldRunImageCallsWithGalleryApi,
-    })
+    const apiInput = await buildAgentApiInput(conversation, round, latestState.tasks)
     if (controller.signal.aborted) throw createAgentAbortError()
     const existingAssistantMessage = round.assistantMessageId
       ? conversation.messages.find((message) => message.id === round.assistantMessageId) ?? null

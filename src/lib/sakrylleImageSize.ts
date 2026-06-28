@@ -1,7 +1,7 @@
 import type { ApiProfile, TaskParams } from '../types'
 import { DEFAULT_IMAGES_MODEL } from './apiProfiles'
 import { getAvailableGroups, getSelectedGroups, getGroupsForApiMode, type SelectedGroups } from './groupSelection'
-import { calculateImageSize, IMAGE_SIZE_TIER_PIXEL_BUDGET, normalizeImageSize } from './size'
+import { calculateImageSizeByBudget, IMAGE_SIZE_TIER_PIXEL_BUDGET, normalizeImageSize } from './size'
 
 const SIZE_PATTERN = /^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/
 const SAKRYLLE_GPT_IMAGE_GROUP_ID = 5
@@ -61,7 +61,7 @@ export function capImageSizeToOneK(size: string): string {
     return normalized
   }
 
-  return calculateImageSize('1K', `${dimensions.width}:${dimensions.height}`) ?? normalized
+  return calculateImageSizeByBudget('1K', `${dimensions.width}:${dimensions.height}`) ?? normalized
 }
 
 export function getSakrylleImageRequestParams(params: TaskParams, profile: ApiProfile): TaskParams {

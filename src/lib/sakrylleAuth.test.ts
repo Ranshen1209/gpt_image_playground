@@ -10,8 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const AUTH_STORAGE_KEY = 'sakrylle-image-playground.auth'
 const PKCE_VERIFIER_KEY = 'sakrylle-image-playground.pkce-verifier'
 const PKCE_STATE_KEY = 'sakrylle-image-playground.pkce-state'
-const TOKEN_URL = 'https://sub.sakrylle.com/oauth/token'
-const AUTHORIZE_URL_PREFIX = 'https://sub.sakrylle.com/oauth/authorize'
+const TOKEN_URL = 'https://oidc1.sakrylle.com/oauth/token'
+const AUTHORIZE_URL_PREFIX = 'https://oidc1.sakrylle.com/oauth/authorize'
 const REDIRECT_ORIGIN = 'https://image.sakrylle.com'
 
 class MockStorage {
@@ -509,12 +509,12 @@ describe('refreshWithGroupId with OIDC discovery', () => {
     )
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({
-        issuer: 'https://sub.sakrylle.com',
-        authorization_endpoint: 'https://sub.sakrylle.com/oauth/authorize',
-        token_endpoint: 'https://sub.sakrylle.com/oidc/token',
-        userinfo_endpoint: 'https://sub.sakrylle.com/v1/me',
-        end_session_endpoint: 'https://sub.sakrylle.com/oauth/logout',
-        jwks_uri: 'https://sub.sakrylle.com/.well-known/jwks.json',
+        issuer: 'https://oidc1.sakrylle.com',
+        authorization_endpoint: 'https://oidc1.sakrylle.com/oauth/authorize',
+        token_endpoint: 'https://oidc1.sakrylle.com/oidc/token',
+        userinfo_endpoint: 'https://oidc1.sakrylle.com/v1/me',
+        end_session_endpoint: 'https://oidc1.sakrylle.com/oauth/logout',
+        jwks_uri: 'https://oidc1.sakrylle.com/.well-known/jwks.json',
       }))
       .mockResolvedValueOnce(jsonResponse({
         access_token: 'new-9',
@@ -528,8 +528,8 @@ describe('refreshWithGroupId with OIDC discovery', () => {
 
     expect(token?.accessToken).toBe('new-9')
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[0][0])).toBe('https://sub.sakrylle.com/.well-known/openid-configuration')
-    expect(String(fetchMock.mock.calls[1][0])).toBe('https://sub.sakrylle.com/oidc/token')
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://oidc1.sakrylle.com/.well-known/openid-configuration')
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://oidc1.sakrylle.com/oidc/token')
     const body = new URLSearchParams(fetchMock.mock.calls[1][1]?.body as string)
     expect(body.get('group_id')).toBe('9')
   })
@@ -547,12 +547,12 @@ describe('refreshWithGroupId with OIDC discovery', () => {
       }),
     )
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
-      issuer: 'https://sub.sakrylle.com',
-      authorization_endpoint: 'https://sub.sakrylle.com/oauth/authorize',
-      token_endpoint: 'https://sub.sakrylle.com/oauth/token',
-      userinfo_endpoint: 'https://sub.sakrylle.com/v1/me',
-      end_session_endpoint: 'https://sub.sakrylle.com/oauth/logout',
-      jwks_uri: 'https://sub.sakrylle.com/.well-known/jwks.json',
+      issuer: 'https://oidc1.sakrylle.com',
+      authorization_endpoint: 'https://oidc1.sakrylle.com/oauth/authorize',
+      token_endpoint: 'https://oidc1.sakrylle.com/oauth/token',
+      userinfo_endpoint: 'https://oidc1.sakrylle.com/v1/me',
+      end_session_endpoint: 'https://oidc1.sakrylle.com/oauth/logout',
+      jwks_uri: 'https://oidc1.sakrylle.com/.well-known/jwks.json',
     }))
 
     const { logoutAndRevoke: logoutAndRevokeWithOidc } = await import('./sakrylleAuth')
@@ -560,7 +560,7 @@ describe('refreshWithGroupId with OIDC discovery', () => {
 
     expect(mockLocalStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(mockLocation.href).toContain('https://sub.sakrylle.com/oauth/logout?')
+    expect(mockLocation.href).toContain('https://oidc1.sakrylle.com/oauth/logout?')
     const logoutUrl = new URL(mockLocation.href)
     expect(logoutUrl.searchParams.get('id_token_hint')).toBe('header.payload.signature')
     expect(logoutUrl.searchParams.get('post_logout_redirect_uri')).toBe(`${REDIRECT_ORIGIN}/`)
@@ -583,7 +583,7 @@ describe('logout', () => {
 
 describe('logoutAndRevoke', () => {
   it('clears local state and fires a revocation request for the refresh token', async () => {
-    const REVOKE_URL = 'https://sub.sakrylle.com/oauth/revoke'
+    const REVOKE_URL = 'https://oidc1.sakrylle.com/oauth/revoke'
     mockLocalStorage.setItem(
       AUTH_STORAGE_KEY,
       JSON.stringify({ accessToken: 'sk_oauth_at', refreshToken: 'rt_to_revoke', expiresAt: Date.now() + 60_000 }),
@@ -680,7 +680,7 @@ describe('handleCallback with id_token', () => {
     const header = btoa(JSON.stringify({ alg: 'RS256', kid: 'test' }))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
     const payload = btoa(JSON.stringify({
-      iss: 'https://sub.sakrylle.com',
+      iss: 'https://oidc1.sakrylle.com',
       sub: '123',
       aud: ['sakrylle-image-playground'],
       exp: Math.floor(Date.now() / 1000) + 3600,

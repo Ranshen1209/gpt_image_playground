@@ -6,6 +6,8 @@ import {
   type CallApiOptions,
   type CallApiResult,
   fetchImageUrlAsDataUrl as defaultFetchImageUrlAsDataUrl,
+  getApiErrorMessage,
+  maybeAppendStreamingHint,
   MIME_MAP,
 } from './imageApiShared'
 import {
@@ -165,7 +167,7 @@ export async function callImagesApiViaChat(opts: CallApiOptions, profile: ApiPro
     })
 
     if (!response.ok) {
-      const err = new Error(await response.text()) as Error & { httpStatus?: number }
+      const err = new Error(maybeAppendStreamingHint(await getApiErrorMessage(response), response.status, true)) as Error & { httpStatus?: number }
       err.httpStatus = response.status
       throw err
     }

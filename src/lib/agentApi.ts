@@ -27,6 +27,12 @@ export interface AgentApiResult {
   rawResponsePayload?: string
 }
 
+interface AgentApiMessage {
+  role: 'user' | 'assistant'
+  text: string
+  imageDataUrls?: string[]
+}
+
 const AGENT_IMAGE_INSTRUCTIONS_COMMON = [
   'You are an image-generation assistant in a multi-turn gallery app.',
   '',
