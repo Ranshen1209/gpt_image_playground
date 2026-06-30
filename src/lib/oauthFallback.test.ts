@@ -173,17 +173,26 @@ describe('oauthFallback', () => {
       expect(canUseOAuthForProfile(profile)).toBe(false)
     })
 
-    // Chat/completions image path (streamChatCompletionsImage) hits POST
-    // chat/completions, which the server gates behind chat.completions:create —
-    // a distinct scope from images:create. The token must carry it.
-    it('requires chat.completions:create for the chat image path (images:create alone is not enough)', () => {
+    // Chat/completions image path is the transport for Sakrylle Images mode;
+    // canonical image OAuth grants use images:create.
+    it('accepts images:create for the chat image path', () => {
       const profile = createProfile({ apiMode: 'images', streamChatCompletionsImage: true })
       vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
         accessToken: 'token',
         expiresAt: Date.now() + 3600000,
         scope: 'images:create responses:create',
       })
-      expect(canUseOAuthForProfile(profile)).toBe(false)
+      expect(canUseOAuthForProfile(profile)).toBe(true)
+    })
+
+    it('accepts legacy image_generation for the chat image path', () => {
+      const profile = createProfile({ apiMode: 'images', streamChatCompletionsImage: true })
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue({
+        accessToken: 'token',
+        expiresAt: Date.now() + 3600000,
+        scope: 'image_generation balance:read',
+      })
+      expect(canUseOAuthForProfile(profile)).toBe(true)
     })
 
     it('returns true for the chat image path when chat.completions:create is granted', () => {

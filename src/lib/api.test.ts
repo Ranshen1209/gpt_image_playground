@@ -536,6 +536,66 @@ describe('callImageApi', () => {
     ])
   })
 
+  it('splits Sakrylle chat image requests into concurrent single-image requests when n is greater than 1', async () => {
+    const chatBodies: unknown[] = []
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes('/chat/completions')) {
+        const requestIndex = chatBodies.length
+        chatBodies.push(JSON.parse(String((init as RequestInit).body)))
+        const streamBody = [
+          `data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"![image](https://cdn.example.com/generated-${requestIndex}.png)"}}]}`,
+          '',
+          'data: [DONE]',
+          '',
+        ].join('\n')
+        return new Response(streamBody, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+
+      const match = url.match(/generated-(\d+)\.png$/)
+      if (!match) throw new Error(`Unexpected fetch URL: ${url}`)
+      return new Response(new Blob([`image-${match[1]}`], { type: 'image/png' }), { status: 200 })
+    })
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        streamChatCompletionsImage: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          baseUrl: 'https://api.sakrylle.com/v1',
+          streamImages: true,
+          streamChatCompletionsImage: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 2 },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(chatBodies).toHaveLength(2)
+    for (const body of chatBodies as Array<{ stream?: boolean; messages?: Array<{ content?: Array<{ type: string; text?: string }> }> }>) {
+      expect(body.stream).toBe(true)
+      expect(body).not.toHaveProperty('n')
+      expect(body.messages?.[0]?.content?.[0]).toMatchObject({
+        type: 'text',
+        text: 'Use the following text as the complete prompt. Do not rewrite it:\nprompt',
+      })
+    }
+    expect(result.images).toEqual([
+      'data:image/png;base64,aW1hZ2UtMA==',
+      'data:image/png;base64,aW1hZ2UtMQ==',
+    ])
+    expect(result.actualParams).toMatchObject({ n: 2 })
+  })
+
   it('keeps successful Images API concurrent results when one request fails', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       const callIndex = fetchMock.mock.calls.length

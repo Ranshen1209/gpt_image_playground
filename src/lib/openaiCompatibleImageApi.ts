@@ -49,9 +49,9 @@ export function shouldUseChatImagePath(profile: ApiProfile): boolean {
     isSakrylleApiBaseUrl(profile.baseUrl)
 }
 
-/** 并发拆分子请求的最大同时在飞数。实测 api.sakrylle.com 单用户并发墙=6（7+ 触发 429
- *  "Concurrency limit exceeded for user"），贴墙取 6 最大化吞吐又不撞限速 */
-const MAX_CONCURRENT_IMAGE_REQUESTS = 6
+/** 并发拆分子请求的最大同时在飞数。生产反馈显示贴近 api.sakrylle.com 单用户并发墙运行
+ *  仍容易出现部分失败；保守留出余量，让重试/补发更稳定。 */
+const MAX_CONCURRENT_IMAGE_REQUESTS = 3
 /** 可重试错误的重试次数 */
 const IMAGE_REQUEST_MAX_RETRIES = 1
 /** 重试前的退避时长（毫秒） */
