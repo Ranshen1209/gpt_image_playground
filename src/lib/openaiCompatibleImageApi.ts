@@ -20,7 +20,7 @@ import {
   normalizeBase64Image,
   pickActualParams,
 } from './imageApiShared'
-import { resolveBearerToken } from './oauthFallback'
+import { canUseChatCompletionsImagePath, resolveBearerToken } from './oauthFallback'
 import { getSakrylleImageRequestParams } from './sakrylleImageSize'
 import { callImagesApiViaChat } from './chatCompletionsImageApi'
 
@@ -801,7 +801,9 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
 async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
-  if (!useApiProxy && shouldUseChatImagePath(profile)) return callImagesApiViaChat(opts, profile)
+  if (!useApiProxy && shouldUseChatImagePath(profile) && await canUseChatCompletionsImagePath(profile)) {
+    return callImagesApiViaChat(opts, profile)
+  }
 
   const { prompt: originalPrompt, inputImageDataUrls } = opts
   const params = getSakrylleImageRequestParams(opts.params, profile)

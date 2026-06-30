@@ -36,9 +36,40 @@ export function canUseOAuthForProfile(profile: ApiProfile): boolean {
   return scope.includes('images:create') || scope.includes('image_generation')
 }
 
+function scopeIncludes(scope: string | undefined, value: string): boolean {
+  return (scope ?? '').split(/\s+/).includes(value)
+}
+
+function tokenAllowsChatCompletions(scope: string | undefined): boolean {
+  return scopeIncludes(scope, 'chat.completions:create')
+}
+
+function findTokenRecordInAuthSnapshot(
+  token: SakrylleAuthToken,
+  groupId: number,
+): Pick<SakrylleAuthToken, 'accessToken' | 'scope'> | undefined {
+  if (token.group?.id === groupId) return token
+  return token.additionalTokens?.find((item) => item.group?.id === groupId)
+}
+
 function findTokenInAuthSnapshot(token: SakrylleAuthToken, groupId: number): string | undefined {
   if (token.group?.id === groupId) return token.accessToken
   return token.additionalTokens?.find((item) => item.group?.id === groupId)?.accessToken
+}
+
+export async function canUseChatCompletionsImagePath(profile: ApiProfile): Promise<boolean> {
+  if (profile.apiKey.trim()) return true
+  if (profile.provider !== 'openai' || !isSakrylleBaseUrl(profile.baseUrl)) return false
+
+  const token = (await refreshIfNeeded()) ?? getStoredToken()
+  if (!token) return false
+
+  const groupId = await ensureSelectedGroupId('images')
+  if (groupId == null) return tokenAllowsChatCompletions(token.scope)
+
+  const latestToken = getStoredToken() ?? token
+  const exactToken = findTokenRecordInAuthSnapshot(latestToken, groupId)
+  return tokenAllowsChatCompletions(exactToken?.scope)
 }
 
 // Returns the Bearer token for Authorization header.

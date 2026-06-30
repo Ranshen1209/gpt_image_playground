@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { canUseOAuthForProfile, resolveBearerToken } from './oauthFallback'
+import { canUseChatCompletionsImagePath, canUseOAuthForProfile, resolveBearerToken } from './oauthFallback'
 import type { ApiProfile } from '../types'
 import * as sakrylleAuth from './sakrylleAuth'
 import * as sakrylleAccount from './sakrylleAccount'
@@ -396,6 +396,43 @@ describe('oauthFallback', () => {
 
       await expect(resolveBearerToken(profile)).resolves.toBe('sk_oauth_responses_group')
       expect(sakrylleAuth.refreshWithGroupId).toHaveBeenCalledWith(9)
+    })
+  })
+
+  describe('canUseChatCompletionsImagePath', () => {
+    it('returns false when the selected image group token only has images:create', async () => {
+      vi.stubGlobal('localStorage', createMockStorage())
+      localStorage.setItem('sakrylle-image-playground.selected-groups', JSON.stringify({ images: 5 }))
+      const token = {
+        accessToken: 'sk_oauth_images',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create responses:create',
+        group: { id: 5, name: 'GPT-Image' },
+      }
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue(token)
+      vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue(token)
+
+      await expect(canUseChatCompletionsImagePath(createProfile())).resolves.toBe(false)
+    })
+
+    it('returns true when the selected image group token has chat.completions:create', async () => {
+      vi.stubGlobal('localStorage', createMockStorage())
+      localStorage.setItem('sakrylle-image-playground.selected-groups', JSON.stringify({ images: 5 }))
+      const token = {
+        accessToken: 'sk_oauth_images',
+        expiresAt: Date.now() + 3600000,
+        scope: 'images:create chat.completions:create',
+        group: { id: 5, name: 'GPT-Image' },
+      }
+      vi.mocked(sakrylleAuth.getStoredToken).mockReturnValue(token)
+      vi.mocked(sakrylleAuth.refreshIfNeeded).mockResolvedValue(token)
+
+      await expect(canUseChatCompletionsImagePath(createProfile())).resolves.toBe(true)
+    })
+
+    it('returns true for explicit API keys because the server validates the key', async () => {
+      await expect(canUseChatCompletionsImagePath(createProfile({ apiKey: 'sk-explicit' }))).resolves.toBe(true)
+      expect(sakrylleAuth.refreshIfNeeded).not.toHaveBeenCalled()
     })
   })
 })
